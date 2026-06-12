@@ -4,7 +4,7 @@ import express from "express";
 import pino from "pino";
 import { matchMaker, Server } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
-import { createRoomRequestSchema, mergeRoomSettings } from "@kartu-satu/shared";
+import { createRoomRequestSchema, mergeRoomSettings } from "@congkak-game/shared";
 import { config } from "./config.js";
 import { GameRoom } from "./rooms/GameRoom.js";
 import { activeRoomCount, hasRoomCode, registerRoomCode, resolveRoomCode } from "./rooms/directory.js";
@@ -81,7 +81,7 @@ function configureHttp(app: express.Application): void {
 }
 
 await gameServer.listen(config.port, undefined, undefined, () => {
-  logger.info({ port: config.port }, "kartu_satu_server_ready");
+  logger.info({ port: config.port }, "congkak_game_server_ready");
 });
 
 function generateRoomCode(): string {

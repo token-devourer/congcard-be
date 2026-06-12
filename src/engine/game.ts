@@ -9,8 +9,8 @@ import type {
   PublicPlayer,
   RoomSettings,
   RoomSettingsInput
-} from "@kartu-satu/shared";
-import { COLORS, mergeRoomSettings } from "@kartu-satu/shared";
+} from "@congkak-game/shared";
+import { COLORS, mergeRoomSettings } from "@congkak-game/shared";
 import { standardMode, shuffleCards } from "./modes/standard.js";
 
 export interface PlayerState extends PublicPlayer {

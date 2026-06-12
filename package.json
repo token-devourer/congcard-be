@@ -1,5 +1,5 @@
 {
-  "name": "server",
+  "name": "congkak-game-server",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -16,7 +16,7 @@
   "dependencies": {
     "@colyseus/core": "^0.17.43",
     "@colyseus/ws-transport": "^0.17.13",
-    "@kartu-satu/shared": "file:shared",
+    "@congkak-game/shared": "file:shared",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",

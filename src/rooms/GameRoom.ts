@@ -8,7 +8,7 @@ import {
   playCardSchema,
   playDrawnSchema,
   roomSettingsSchema
-} from "@kartu-satu/shared";
+} from "@congkak-game/shared";
 import { config } from "../config.js";
 import {
   addPlayer,

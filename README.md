@@ -1,6 +1,6 @@
-# Kartu Satu Backend
+# Congkak Game Backend
 
-Authoritative Colyseus backend for Kartu Satu.
+Authoritative Colyseus backend for Congkak Game.
 
 ## Local Development
 

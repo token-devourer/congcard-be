@@ -1,6 +1,6 @@
 import { randomInt } from "node:crypto";
-import type { Card, CardValue, Color, GameMode, TurnContext } from "@kartu-satu/shared";
-import { COLORS } from "@kartu-satu/shared";
+import type { Card, CardValue, Color, GameMode, TurnContext } from "@congkak-game/shared";
+import { COLORS } from "@congkak-game/shared";
 
 function numberCards(color: Color, deckIndex: number): Card[] {
   const cards: Card[] = [{ id: `${deckIndex}-${color}-0-0`, color, value: 0, deckIndex }];

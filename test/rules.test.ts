@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Card } from "@kartu-satu/shared";
+import type { Card } from "@congkak-game/shared";
 import { standardMode } from "../src/engine/modes/standard.js";
 import {
   addPlayer,
