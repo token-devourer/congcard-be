@@ -199,22 +199,27 @@ describe("standard mode", () => {
     expect(snapshotFor(state).currentPlayerId).toBe("p2");
   });
 
-  it("rejects One calls before the shared window opens", () => {
+  it("opens the One window immediately with no pre-buffer", () => {
     const state = controlledGame();
     state.players[0]!.hand = [card("red-1", "red", 1), card("blue-2", "blue", 2)];
 
     playCard(state, "p1", "red-1");
 
-    expect(() => callOne(state, "p1")).toThrow("One window is open");
+    // No "ready in" delay: the window is actionable the instant it opens.
+    expect(state.oneWindow!.opensAt).toBeLessThanOrEqual(Date.now());
+    expect(() => callOne(state, "p1")).not.toThrow();
+    expect(state.pendingOneCall?.playerId).toBe("p1");
   });
 
-  it("rejects catches before the shared window opens", () => {
+  it("opens the catch window immediately with no pre-buffer", () => {
     const state = controlledGame();
     state.players[0]!.hand = [card("red-1", "red", 1), card("blue-2", "blue", 2)];
 
     playCard(state, "p1", "red-1");
 
-    expect(() => catchOne(state, "p2", "p1")).toThrow("cannot be caught");
+    expect(() => catchOne(state, "p2", "p1")).not.toThrow();
+    expect(state.players[0]!.hand).toHaveLength(3);
+    expect(state.oneWindow).toBeUndefined();
   });
 
   it("rejects One actions after the window expires", () => {

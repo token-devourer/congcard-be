@@ -13,8 +13,13 @@ import type {
 import { COLORS, mergeRoomSettings } from "@congcard/shared";
 import { standardMode, shuffleCards, buildSingleDeck } from "./modes/standard.js";
 
-const ONE_CALL_DELAY_MS = 1200;
-const ONE_CALL_WINDOW_MS = 3000;
+// No pre-buffer: the One/Catch window opens the instant a player hits one card,
+// so the button is actionable immediately. The challenge now comes from the
+// button popping up at a random screen edge (see FE UnoButton) rather than from
+// a "ready in" delay. The window still expires silently after WINDOW_MS so the
+// round keeps moving; the client just no longer renders a countdown for it.
+const ONE_CALL_DELAY_MS = 0;
+const ONE_CALL_WINDOW_MS = 4000;
 const ONE_CALL_SETTLE_MS = 250;
 
 export interface PlayerState extends PublicPlayer {
