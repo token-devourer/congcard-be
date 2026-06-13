@@ -200,7 +200,7 @@ describe("standard mode", () => {
     expect(state.players[0]!.hand).toHaveLength(1);
   });
 
-  it("passes the turn when there is nothing left to draw", () => {
+  it("opens a fresh 108-card deck when there is nothing left to draw", () => {
     const state = controlledGame();
     state.players[0]!.hand = [card("green-9", "green", 9)];
     state.players[1]!.hand = [card("green-8", "green", 8)];
@@ -209,22 +209,37 @@ describe("standard mode", () => {
 
     drawCard(state, "p1");
 
-    expect(state.players[0]!.hand).toHaveLength(1);
-    expect(snapshotFor(state).currentPlayerId).toBe("p2");
+    expect(state.players[0]!.hand).toHaveLength(2);
+    expect(state.drawPile).toHaveLength(107);
+    expect(state.actionLog.some((entry) => entry.message.includes("fresh deck"))).toBe(true);
   });
 
-  it("draws only the available cards when a penalty exceeds the pile", () => {
+  it("keeps fresh-deck card ids unique by bumping the deckIndex", () => {
+    const state = controlledGame();
+    state.players[0]!.hand = [card("green-9", "green", 9)];
+    state.players[1]!.hand = [card("green-8", "green", 8)];
+    state.drawPile = [];
+    state.discardPile = [card("top", "red", 5)];
+
+    drawCard(state, "p1");
+
+    const drawn = state.players[0]!.hand[1]!;
+    expect(drawn.deckIndex).toBe(1);
+    expect(state.drawPile.every((item) => item.deckIndex === 1)).toBe(true);
+  });
+
+  it("completes a penalty from a fresh deck when the pile runs dry", () => {
     const state = controlledGame();
     state.players[0]!.hand = [card("draw2", "red", "draw2"), card("blue-2", "blue", 2)];
     state.players[1]!.hand = [card("green-8", "green", 8)];
     state.drawPile = [];
     state.discardPile = [card("top", "red", 5)];
 
-    // Only one card is recoverable (the buried "top"); the +2 penalty must
-    // deliver what exists instead of crashing the action.
+    // Only one card is recoverable (the buried "top"); the second penalty
+    // card must come from a freshly opened deck instead of being dropped.
     playCard(state, "p1", "draw2");
 
-    expect(state.players[1]!.hand).toHaveLength(2);
+    expect(state.players[1]!.hand).toHaveLength(3);
     expect(snapshotFor(state).currentPlayerId).toBe("p1");
   });
 

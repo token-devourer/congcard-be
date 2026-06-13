@@ -44,6 +44,18 @@ export function shuffleCards<T>(items: T[]): T[] {
   return copy;
 }
 
+export function buildSingleDeck(deckIndex: number): Card[] {
+  const cards: Card[] = [];
+
+  for (const color of COLORS) {
+    cards.push(...numberCards(color, deckIndex));
+    cards.push(...actionCards(color, deckIndex));
+  }
+
+  cards.push(...wildCards(deckIndex));
+  return cards;
+}
+
 export const standardMode: GameMode = {
   id: "standard",
   initialHandSize: 7,
@@ -52,12 +64,7 @@ export const standardMode: GameMode = {
     const decks: Card[] = [];
 
     for (let deckIndex = 0; deckIndex < deckCount; deckIndex += 1) {
-      for (const color of COLORS) {
-        decks.push(...numberCards(color, deckIndex));
-        decks.push(...actionCards(color, deckIndex));
-      }
-
-      decks.push(...wildCards(deckIndex));
+      decks.push(...buildSingleDeck(deckIndex));
     }
 
     return shuffleCards(decks);

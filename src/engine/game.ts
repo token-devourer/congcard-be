@@ -11,7 +11,7 @@ import type {
   RoomSettingsInput
 } from "@congcard/shared";
 import { COLORS, mergeRoomSettings } from "@congcard/shared";
-import { standardMode, shuffleCards } from "./modes/standard.js";
+import { standardMode, shuffleCards, buildSingleDeck } from "./modes/standard.js";
 
 const ONE_CALL_DELAY_MS = 700;
 const ONE_CALL_WINDOW_MS = 3000;
@@ -682,7 +682,22 @@ function takeCard(state: GameStateInternal): Card | undefined {
     reshuffleDiscard(state);
   }
 
+  if (state.drawPile.length === 0) {
+    addFreshDeck(state);
+  }
+
   return state.drawPile.pop();
+}
+
+// Every card can end up in players' hands with nothing left to recycle from
+// the discard pile. Open a brand-new 108-card deck (with an unused deckIndex
+// so card ids stay unique) instead of stalling the game.
+function addFreshDeck(state: GameStateInternal): void {
+  const inPlay = [...state.drawPile, ...state.discardPile, ...state.players.flatMap((player) => player.hand)];
+  const nextDeckIndex = inPlay.reduce((max, item) => Math.max(max, item.deckIndex), -1) + 1;
+
+  state.drawPile = shuffleCards(buildSingleDeck(nextDeckIndex));
+  pushLog(state, "round", "A fresh deck of 108 cards was added to the draw pile.");
 }
 
 // Only used while dealing, where the deck can never run dry (10 × 7 + 1 < 108).
