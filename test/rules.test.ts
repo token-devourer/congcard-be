@@ -11,6 +11,7 @@ import {
   handleTurnTimeout,
   playCard,
   resolveChallenge,
+  resolvePendingOneCall,
   setReady,
   snapshotFor,
   startRound,
@@ -105,7 +106,7 @@ describe("standard mode", () => {
     expect(state.oneWindow).toBeUndefined();
   });
 
-  it("allows a valid One call", () => {
+  it("allows a valid One call after the server arbitration buffer", () => {
     const state = controlledGame();
     state.players[0]!.hand = [card("red-1", "red", 1), card("blue-2", "blue", 2)];
 
@@ -114,7 +115,29 @@ describe("standard mode", () => {
     state.oneWindow!.deadline = Date.now() + 1000;
     callOne(state, "p1");
 
+    expect(state.players[0]!.calledOne).toBe(false);
+    expect(snapshotFor(state, "p1").oneWindow?.callPending).toBe(true);
+
+    state.pendingOneCall!.resolvesAt = Date.now() - 1;
+    expect(resolvePendingOneCall(state)).toBe(true);
+
     expect(state.players[0]!.calledOne).toBe(true);
+    expect(state.oneWindow).toBeUndefined();
+  });
+
+  it("lets a catch beat a pending One call during arbitration", () => {
+    const state = controlledGame();
+    state.players[0]!.hand = [card("red-1", "red", 1), card("blue-2", "blue", 2)];
+
+    playCard(state, "p1", "red-1");
+    state.oneWindow!.opensAt = Date.now() - 1;
+    state.oneWindow!.deadline = Date.now() + 1000;
+    callOne(state, "p1");
+    catchOne(state, "p2", "p1");
+
+    expect(state.players[0]!.hand).toHaveLength(3);
+    expect(state.players[0]!.calledOne).toBe(false);
+    expect(state.pendingOneCall).toBeUndefined();
     expect(state.oneWindow).toBeUndefined();
   });
 
@@ -198,6 +221,20 @@ describe("standard mode", () => {
     expect(expireOneWindow(state)).toBe(true);
     expect(state.oneWindow).toBeUndefined();
     expect(state.players[0]!.hand).toHaveLength(1);
+  });
+
+  it("closes a stale One window when the target no longer has one card", () => {
+    const state = controlledGame();
+    state.players[0]!.hand = [card("red-1", "red", 1), card("blue-2", "blue", 2)];
+    state.players[1]!.hand = [card("red-draw2", "red", "draw2"), card("green-8", "green", 8), card("blue-9", "blue", 9)];
+
+    playCard(state, "p1", "red-1");
+    expect(state.oneWindow?.playerId).toBe("p1");
+
+    playCard(state, "p2", "red-draw2");
+
+    expect(state.players[0]!.hand).toHaveLength(3);
+    expect(state.oneWindow).toBeUndefined();
   });
 
   it("passes the turn when there is nothing left to draw", () => {
