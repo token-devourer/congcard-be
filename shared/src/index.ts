@@ -47,7 +47,7 @@ export const CARD_VALUES = [
 export type CardValue = (typeof CARD_VALUES)[number];
 export type GamePhase = "lobby" | "playing" | "roundEnd" | "gameEnd";
 export type Direction = 1 | -1;
-export type ScoreTarget = 0 | 500;
+export type ScoreTarget = 0 | 500 | "lastStand";
 export type ParticipantRole = "player" | "waiting" | "spectator";
 export type ActionType =
   | "playCard"
@@ -101,6 +101,7 @@ export interface PublicPlayer {
   calledOne: boolean;
   autoPlay: boolean;
   missedDisconnectedTurns: number;
+  finishedRank?: number;
 }
 
 export interface PrivatePlayerState {
@@ -139,6 +140,13 @@ export interface PendingStack {
   targetPlayerId: string;
   totalDraw: number;
   roundWinnerId?: string;
+}
+
+export interface LastStandPlacement {
+  playerId: string;
+  rank: number;
+  finishedAt: number;
+  isLoser?: boolean;
 }
 
 export interface GameLogEntry {
@@ -182,6 +190,7 @@ export interface GameSnapshot {
   actionLog: GameLogEntry[];
   roundWinnerId?: string;
   gameWinnerId?: string;
+  lastStandPlacements?: LastStandPlacement[];
 }
 
 export interface RoundResult {
@@ -223,7 +232,7 @@ export const roomSettingsSchema = z.object({
   modeId: z.literal("standard").default("standard"),
   maxPlayers: z.number().int().min(2).max(10).default(10),
   turnTimeoutSec: z.number().int().min(15).max(60).default(30),
-  scoreTarget: z.union([z.literal(0), z.literal(500)]).default(0),
+  scoreTarget: z.union([z.literal(0), z.literal(500), z.literal("lastStand")]).default(0),
   allowMidGameJoin: z.boolean().default(true),
   jumpInEnabled: z.boolean().default(false),
   stackingEnabled: z.boolean().default(false),

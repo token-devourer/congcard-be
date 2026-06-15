@@ -451,6 +451,136 @@ describe("standard mode", () => {
     expect(state.roundWinnerId).toBe("p1");
   });
 
+  it("keeps a Last Stand round active after the first finisher", () => {
+    const state = controlledGame3();
+    state.settings.scoreTarget = "lastStand";
+    state.players[0]!.hand = [card("p1-red-1", "red", 1)];
+    state.players[1]!.hand = [card("p2-red-2", "red", 2)];
+    state.players[2]!.hand = [card("p3-blue-7", "blue", 7)];
+
+    playCard(state, "p1", "p1-red-1");
+
+    expect(state.phase).toBe("playing");
+    expect(state.roundWinnerId).toBe("p1");
+    expect(state.lastStandPlacements).toMatchObject([{ playerId: "p1", rank: 1 }]);
+    expect(snapshotFor(state).players.find((player) => player.id === "p1")?.finishedRank).toBe(1);
+    expect(snapshotFor(state).currentPlayerId).toBe("p2");
+  });
+
+  it("ends Last Stand when one player remains and marks the loser last", () => {
+    const state = controlledGame3();
+    state.settings.scoreTarget = "lastStand";
+    state.players[0]!.hand = [card("p1-red-1", "red", 1)];
+    state.players[1]!.hand = [card("p2-red-2", "red", 2)];
+    state.players[2]!.hand = [card("p3-blue-7", "blue", 7)];
+
+    playCard(state, "p1", "p1-red-1");
+    playCard(state, "p2", "p2-red-2");
+
+    expect(state.phase).toBe("roundEnd");
+    expect(state.players[0]!.score).toBe(0);
+    expect(state.lastStandPlacements).toMatchObject([
+      { playerId: "p1", rank: 1 },
+      { playerId: "p2", rank: 2 },
+      { playerId: "p3", rank: 3, isLoser: true }
+    ]);
+  });
+
+  it("skips finished Last Stand players when choosing penalty targets", () => {
+    const state = controlledGame3();
+    state.settings.scoreTarget = "lastStand";
+    state.players[0]!.hand = [card("p1-red-1", "red", 1)];
+    state.players[1]!.hand = [card("p2-red-draw2", "red", "draw2"), card("p2-green-8", "green", 8)];
+    state.players[2]!.hand = [card("p3-blue-7", "blue", 7)];
+
+    playCard(state, "p1", "p1-red-1");
+    playCard(state, "p2", "p2-red-draw2");
+
+    expect(state.players[0]!.hand).toHaveLength(0);
+    expect(state.players[2]!.hand).toHaveLength(3);
+    expect(snapshotFor(state).currentPlayerId).toBe("p2");
+  });
+
+  it("finalizes a Last Stand Wild Draw Four finisher only after challenge resolution", () => {
+    const state = controlledGame3();
+    state.settings.scoreTarget = "lastStand";
+    state.players[0]!.hand = [card("p1-wild4", null, "wild4")];
+    state.players[1]!.hand = [card("p2-yellow-7", "yellow", 7)];
+    state.players[2]!.hand = [card("p3-blue-7", "blue", 7)];
+
+    playCard(state, "p1", "p1-wild4", "blue");
+
+    expect(state.pendingChallenge).toBeDefined();
+    expect(state.players[0]!.finishedRank).toBeUndefined();
+
+    resolveChallenge(state, "p2", true);
+
+    expect(state.pendingChallenge).toBeUndefined();
+    expect(state.players[0]!.finishedRank).toBe(1);
+    expect(state.phase).toBe("playing");
+  });
+
+  it("lets a Last Stand stack continue after finishers leave active rotation", () => {
+    const state = controlledGame3();
+    state.settings.scoreTarget = "lastStand";
+    state.settings.stackingEnabled = true;
+    state.players[0]!.hand = [card("p1-red-draw2", "red", "draw2")];
+    state.players[1]!.hand = [card("p2-blue-draw2", "blue", "draw2")];
+    state.players[2]!.hand = [card("p3-green-7", "green", 7)];
+
+    playCard(state, "p1", "p1-red-draw2");
+
+    expect(state.players[0]!.finishedRank).toBe(1);
+    expect(state.pendingStack).toMatchObject({ targetPlayerId: "p2", totalDraw: 2 });
+
+    playCard(state, "p2", "p2-blue-draw2");
+
+    expect(state.players[1]!.finishedRank).toBe(2);
+    expect(state.pendingStack).toMatchObject({ targetPlayerId: "p3", totalDraw: 4 });
+
+    drawCard(state, "p3");
+
+    expect(state.phase).toBe("roundEnd");
+    expect(state.players[2]!.hand).toHaveLength(5);
+    expect(state.lastStandPlacements).toMatchObject([
+      { playerId: "p1", rank: 1 },
+      { playerId: "p2", rank: 2 },
+      { playerId: "p3", rank: 3, isLoser: true }
+    ]);
+  });
+
+  it("allows Jump In to create a Last Stand finisher", () => {
+    const state = controlledGame3();
+    state.settings.scoreTarget = "lastStand";
+    state.settings.jumpInEnabled = true;
+    state.players[0]!.hand = [card("p1-red-5", "red", 5), card("p1-blue-1", "blue", 1), card("p1-green-2", "green", 2)];
+    state.players[1]!.hand = [card("p2-yellow-7", "yellow", 7)];
+    state.players[2]!.hand = [card("p3-red-5", "red", 5)];
+
+    playCard(state, "p1", "p1-red-5");
+    playCard(state, "p3", "p3-red-5");
+
+    expect(state.players[2]!.finishedRank).toBe(1);
+    expect(state.phase).toBe("playing");
+    expect(state.roundWinnerId).toBe("p3");
+  });
+
+  it("clears Last Stand placements when the next round starts", () => {
+    const state = controlledGame3();
+    state.settings.scoreTarget = "lastStand";
+    state.players[0]!.hand = [card("p1-red-1", "red", 1)];
+    state.players[1]!.hand = [card("p2-red-2", "red", 2)];
+    state.players[2]!.hand = [card("p3-blue-7", "blue", 7)];
+
+    playCard(state, "p1", "p1-red-1");
+    playCard(state, "p2", "p2-red-2");
+    startRound(state);
+
+    expect(state.phase).toBe("playing");
+    expect(state.lastStandPlacements).toBeUndefined();
+    expect(state.players.every((player) => player.finishedRank === undefined)).toBe(true);
+  });
+
   it("starts a round from lobby with ready players", () => {
     const state = createGame("ABC123");
     addPlayer(state, "p1", "Ava", "sun");
