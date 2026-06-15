@@ -10,7 +10,6 @@ import {
   expireOneWindow,
   handleTurnTimeout,
   playCard,
-  playDrawn,
   resolveAutomatedTurns,
   resolveChallenge,
   resolvePendingOneCall,
@@ -105,6 +104,10 @@ describe("standard mode", () => {
 
     playCard(state, "p1", "wild4", "blue");
     expect(state.pendingChallenge?.guilty).toBe(true);
+
+    callOne(state, "p1");
+    state.pendingOneCall!.resolvesAt = Date.now() - 1;
+    expect(resolvePendingOneCall(state)).toBe(true);
 
     resolveChallenge(state, "p2", true);
 
@@ -295,6 +298,7 @@ describe("standard mode", () => {
 
     playCard(state, "p1", "red-1");
     expect(state.oneWindow?.playerId).toBe("p1");
+    state.oneWindow!.deadline = Date.now() - 1;
 
     playCard(state, "p2", "red-draw2");
 
@@ -302,7 +306,7 @@ describe("standard mode", () => {
     expect(state.oneWindow).toBeUndefined();
   });
 
-  it("closes the One window when the next player takes a valid turn action", () => {
+  it("blocks turn actions until the One window is resolved or expires", () => {
     const state = controlledGame();
     state.players[0]!.hand = [card("red-1", "red", 1), card("green-2", "green", 2)];
     state.players[1]!.hand = [card("red-3", "red", 3), card("blue-4", "blue", 4), card("yellow-5", "yellow", 5)];
@@ -310,10 +314,13 @@ describe("standard mode", () => {
     playCard(state, "p1", "red-1");
     expect(state.oneWindow?.playerId).toBe("p1");
 
+    expect(() => playCard(state, "p2", "red-3")).toThrow("One window");
+
+    state.oneWindow!.deadline = Date.now() - 1;
     playCard(state, "p2", "red-3");
 
     expect(state.oneWindow).toBeUndefined();
-    expect(() => catchOne(state, "p2", "p1")).toThrow("cannot be caught");
+    expect(snapshotFor(state).currentPlayerId).toBe("p1");
   });
 
   it("keeps the One window open after an invalid next-player action", () => {
@@ -379,6 +386,9 @@ describe("standard mode", () => {
     expect(state.pendingChallenge).toBeDefined();
 
     state.turnDeadline = Date.now() - 1;
+    expect(handleTurnTimeout(state)).toBe(false);
+
+    state.oneWindow!.deadline = Date.now() - 1;
     expect(handleTurnTimeout(state)).toBe(true);
 
     expect(state.pendingChallenge).toBeUndefined();
@@ -499,30 +509,36 @@ describe("standard mode", () => {
       card("challenge-4", "yellow", 4),
       card("challenge-5", "yellow", 5),
       card("challenge-6", "yellow", 6),
-      card("p1-catch-blue-9", "blue", 9),
-      card("p1-catch-red-7", "red", 7),
       card("p3-draw2-blue-1", "blue", 1),
-      card("p3-draw2-blue-2", "blue", 2)
+      card("p3-draw2-blue-2", "blue", 2),
+      card("p1-catch-blue-9", "blue", 9),
+      card("p1-catch-red-7", "red", 7)
     ];
 
     playCard(state, "p1", "p1-red-1");
     expect(snapshotFor(state).currentPlayerId).toBe("p2");
     expect(state.oneWindow?.playerId).toBe("p1");
 
+    catchOne(state, "p2", "p1");
+    expect(state.players[0]!.hand.map((item) => item.id)).toContain("p1-catch-red-7");
+    expect(state.oneWindow).toBeUndefined();
+
     playCard(state, "p2", "p2-red-draw2");
     expect(state.players[2]!.hand).toHaveLength(5);
     expect(snapshotFor(state).currentPlayerId).toBe("p1");
     expect(state.oneWindow).toBeUndefined();
 
-    expect(() => catchOne(state, "p2", "p1")).toThrow("cannot be caught");
-
-    drawCard(state, "p1");
-    playDrawn(state, "p1", false);
+    playCard(state, "p1", "p1-catch-red-7");
     expect(snapshotFor(state).currentPlayerId).toBe("p2");
 
     playCard(state, "p2", "p2-wild4", "blue");
     expect(state.pendingChallenge).toMatchObject({ offenderId: "p2", challengerId: "p3", guilty: false });
     expect(state.oneWindow?.playerId).toBe("p2");
+
+    expect(() => resolveChallenge(state, "p3", true)).toThrow("One window");
+    callOne(state, "p2");
+    state.pendingOneCall!.resolvesAt = Date.now() - 1;
+    expect(resolvePendingOneCall(state)).toBe(true);
 
     resolveChallenge(state, "p3", true);
     expect(state.pendingChallenge).toBeUndefined();
