@@ -7,6 +7,7 @@ import type {
   GamePhase,
   GameSnapshot,
   LastStandPlacement,
+  PauseReason,
   ParticipantRole,
   PendingChallenge,
   PendingStack,
@@ -51,6 +52,7 @@ export interface GameStateInternal {
   turnDeadline?: number;
   pendingChallenge?: PendingChallenge;
   pendingStack?: PendingStack;
+  pauseReason?: PauseReason;
   oneWindow?: { playerId: string; opensAt: number; deadline: number };
   pendingOneCall?: { playerId: string; resolvesAt: number };
   roundNumber: number;
@@ -181,6 +183,7 @@ export function setPlayerConnected(state: GameStateInternal, id: string, connect
     player.ready = false;
     pushLog(state, "room", `${player.nickname} disconnected.`);
     assignHost(state);
+    syncPauseState(state);
   } else {
     connectPlayer(state, player);
   }
@@ -202,6 +205,7 @@ export function setPlayerAway(state: GameStateInternal, id: string, away: boolea
   player.autoPlay = away;
   pushLog(state, "room", away ? `${player.nickname} is away.` : `${player.nickname} returned to the table.`);
   assignHost(state);
+  syncPauseState(state);
 }
 
 export function removePlayer(state: GameStateInternal, id: string): void {
@@ -219,6 +223,7 @@ export function removePlayer(state: GameStateInternal, id: string): void {
     player.connected = false;
     player.away = false;
     player.ready = false;
+    syncPauseState(state);
   }
 
   pushLog(state, "room", `${player.nickname} left the room.`);
@@ -285,7 +290,11 @@ export function kickPlayer(state: GameStateInternal, hostId: string, targetId: s
       delete state.pendingOneCall;
     }
 
-    if (state.pendingStack?.targetPlayerId === targetId || state.pendingStack?.roundWinnerId === targetId) {
+    if (
+      state.pendingStack?.targetPlayerId === targetId ||
+      state.pendingStack?.roundWinnerId === targetId ||
+      state.pendingStack?.offenderId === targetId
+    ) {
       delete state.pendingStack;
     }
 
@@ -360,6 +369,7 @@ export function startRound(state: GameStateInternal): void {
   state.discardPile = [];
   delete state.pendingChallenge;
   delete state.pendingStack;
+  delete state.pauseReason;
   delete state.oneWindow;
   delete state.pendingOneCall;
   delete state.roundWinnerId;
@@ -401,14 +411,16 @@ export function startRound(state: GameStateInternal): void {
 export function playCard(state: GameStateInternal, playerId: string, cardId: string, declaredColor?: Color): void {
   ensurePlaying(state);
   ensureNoPendingOneCall(state);
-  ensureNoPendingChallenge(state);
+  ensureNotPaused(state);
   const mode = getMode(state.settings);
   const current = currentPlayer(state);
   let player = current.id === playerId ? current : findPlayer(state, playerId);
   const actingOutOfTurn = current.id !== playerId;
   ensurePlayerInteractive(player);
+  const jumpingIn = actingOutOfTurn && canJumpIn(state, player, cardId);
+  const jumpingIntoStack = Boolean(jumpingIn && state.pendingStack);
 
-  if (actingOutOfTurn && !canJumpIn(state, player, cardId)) {
+  if (actingOutOfTurn && !jumpingIn) {
     throw new GameError("not_your_turn", "It is not your turn.");
   }
 
@@ -436,7 +448,14 @@ export function playCard(state: GameStateInternal, playerId: string, cardId: str
   }
 
   const handBefore = [...player.hand];
-  const stacking = state.pendingStack;
+  const stacking = jumpingIntoStack ? undefined : state.pendingStack;
+  const challengeStackResponse = Boolean(
+    state.pendingChallenge && stacking?.challengeable && stacking.targetPlayerId === player.id && canStackCard(card, stacking)
+  );
+  if (state.pendingChallenge && !challengeStackResponse) {
+    throw new GameError("pending_challenge", "Resolve the Wild Draw Four challenge first.");
+  }
+
   if (stacking) {
     if (stacking.targetPlayerId !== player.id || !canStackCard(card, stacking)) {
       throw new GameError("invalid_card", "Only a matching draw card can be stacked.");
@@ -450,6 +469,11 @@ export function playCard(state: GameStateInternal, playerId: string, cardId: str
   }
 
   ensureNoActiveOneWindow(state);
+
+  if (jumpingIntoStack) {
+    delete state.pendingStack;
+    delete state.pendingChallenge;
+  }
 
   player.hand.splice(cardIndex, 1);
   player.cardCount = player.hand.length;
@@ -469,7 +493,7 @@ export function playCard(state: GameStateInternal, playerId: string, cardId: str
   if (stacking) {
     applyStackedCard(state, player, card);
   } else {
-    applyPlayedCard(state, player, card, handBefore);
+    applyPlayedCard(state, player, card, handBefore, { resetStackFromJumpIn: jumpingIntoStack });
   }
 
   if (!state.pendingChallenge && !state.pendingStack && player.hand.length === 0) {
@@ -480,6 +504,7 @@ export function playCard(state: GameStateInternal, playerId: string, cardId: str
 export function drawCard(state: GameStateInternal, playerId: string): void {
   ensurePlaying(state);
   ensureNoPendingOneCall(state);
+  ensureNotPaused(state);
   ensureNoPendingChallenge(state);
   const mode = getMode(state.settings);
   const player = currentPlayer(state);
@@ -529,6 +554,7 @@ export function drawCard(state: GameStateInternal, playerId: string): void {
 export function playDrawn(state: GameStateInternal, playerId: string, play: boolean, declaredColor?: Color): void {
   ensurePlaying(state);
   ensureNoPendingOneCall(state);
+  ensureNotPaused(state);
   ensureNoPendingChallenge(state);
   const player = currentPlayer(state);
 
@@ -556,6 +582,7 @@ export function playDrawn(state: GameStateInternal, playerId: string, play: bool
 
 export function callOne(state: GameStateInternal, playerId: string): void {
   ensurePlaying(state);
+  ensureNotPaused(state);
   const player = findPlayer(state, playerId);
   ensurePlayerInteractive(player);
   const oneWindow = state.oneWindow;
@@ -587,6 +614,7 @@ export function callOne(state: GameStateInternal, playerId: string): void {
 
 export function catchOne(state: GameStateInternal, catcherId: string, targetId: string): void {
   ensurePlaying(state);
+  ensureNotPaused(state);
   const catcher = findPlayer(state, catcherId);
   ensurePlayerInteractive(catcher);
   const target = findPlayer(state, targetId);
@@ -647,6 +675,7 @@ export function expireOneWindow(state: GameStateInternal): boolean {
 export function resolveChallenge(state: GameStateInternal, playerId: string, accept: boolean, automated = false): void {
   ensurePlaying(state);
   ensureNoPendingOneCall(state);
+  ensureNotPaused(state);
   const pending = state.pendingChallenge;
   if (!pending) {
     throw new GameError("no_challenge", "There is no Wild Draw Four to challenge.");
@@ -663,12 +692,22 @@ export function resolveChallenge(state: GameStateInternal, playerId: string, acc
   if (!automated) {
     ensurePlayerInteractive(challenger);
   }
+  const challengeableStack =
+    state.pendingStack?.challengeable &&
+    state.pendingStack.targetPlayerId === pending.challengerId &&
+    state.pendingStack.offenderId === pending.offenderId
+      ? state.pendingStack
+      : undefined;
   delete state.pendingChallenge;
+  if (challengeableStack) {
+    delete state.pendingStack;
+  }
 
   if (!accept) {
-    drawMany(state, challenger, 4);
+    const totalDraw = challengeableStack?.totalDraw ?? 4;
+    drawMany(state, challenger, totalDraw);
     state.currentSeat = seatAfter(state, challenger.seat);
-    pushLog(state, "challenge", `${challenger.nickname} took four cards.`);
+    pushLog(state, "challenge", totalDraw === 4 ? `${challenger.nickname} took four cards.` : `${challenger.nickname} took ${totalDraw} cards.`);
   } else if (pending.guilty) {
     drawMany(state, offender, 4);
     state.currentSeat = challenger.seat;
@@ -687,6 +726,11 @@ export function resolveChallenge(state: GameStateInternal, playerId: string, acc
 }
 
 export function handleTurnTimeout(state: GameStateInternal): boolean {
+  const pause = syncPauseState(state);
+  if (pause.paused) {
+    return pause.changed;
+  }
+
   if (state.phase !== "playing" || !state.turnDeadline || Date.now() < state.turnDeadline) {
     return false;
   }
@@ -704,30 +748,20 @@ export function handleTurnTimeout(state: GameStateInternal): boolean {
     return false;
   }
 
-  if (state.pendingStack) {
-    const player = currentPlayer(state);
-    markMissedDisconnectedTurn(state, player);
-    resolveStackDraw(state, player);
-    return true;
-  }
-
   const pending = state.pendingChallenge;
   if (pending) {
     // An unanswered Wild Draw Four must not stall the game forever: when the
     // turn timer lapses, resolve it as if the challenger declined.
     const challenger = findPlayer(state, pending.challengerId);
-    const offender = findPlayer(state, pending.offenderId);
     markMissedDisconnectedTurn(state, challenger);
-    delete state.pendingChallenge;
-    drawMany(state, challenger, 4);
-    state.currentSeat = seatAfter(state, challenger.seat);
-    pushLog(state, "challenge", `${challenger.nickname} took four cards.`);
-    setTurnDeadline(state);
+    resolveChallenge(state, challenger.id, false, true);
+    return true;
+  }
 
-    if (offender.hand.length === 0) {
-      finishPlayerOrCompleteRound(state, offender.id);
-    }
-
+  if (state.pendingStack) {
+    const player = currentPlayer(state);
+    markMissedDisconnectedTurn(state, player);
+    resolveStackDraw(state, player);
     return true;
   }
 
@@ -803,6 +837,10 @@ export function snapshotFor(state: GameStateInternal, playerId?: string): GameSn
     snapshot.pendingStack = state.pendingStack;
   }
 
+  if (state.pauseReason) {
+    snapshot.pauseReason = state.pauseReason;
+  }
+
   if (state.lastStandPlacements) {
     snapshot.lastStandPlacements = state.lastStandPlacements;
   }
@@ -834,6 +872,11 @@ export function sendEmote(state: GameStateInternal, playerId: string, emoteId: s
 }
 
 export function resolveAutomatedTurns(state: GameStateInternal): boolean {
+  const pause = syncPauseState(state);
+  if (pause.paused) {
+    return pause.changed;
+  }
+
   let changed = false;
   const limit = state.players.length + 5;
 
@@ -843,6 +886,18 @@ export function resolveAutomatedTurns(state: GameStateInternal): boolean {
     }
 
     if (hasActiveOneWindow(state)) {
+      return changed;
+    }
+
+    const pending = state.pendingChallenge;
+    if (pending) {
+      const challenger = findPlayer(state, pending.challengerId);
+      if (isAutoControllable(challenger)) {
+        resolveChallenge(state, challenger.id, false, true);
+        changed = true;
+        continue;
+      }
+
       return changed;
     }
 
@@ -860,18 +915,6 @@ export function resolveAutomatedTurns(state: GameStateInternal): boolean {
       resolveStackDraw(state, player);
       changed = true;
       continue;
-    }
-
-    const pending = state.pendingChallenge;
-    if (pending) {
-      const challenger = findPlayer(state, pending.challengerId);
-      if (isAutoControllable(challenger)) {
-        resolveChallenge(state, challenger.id, false, true);
-        changed = true;
-        continue;
-      }
-
-      return changed;
     }
 
     if (!isAutoControllable(player)) {
@@ -900,7 +943,13 @@ function applyOpeningCard(state: GameStateInternal, card: Card): void {
   }
 }
 
-function applyPlayedCard(state: GameStateInternal, player: PlayerState, card: Card, handBefore: Card[]): void {
+function applyPlayedCard(
+  state: GameStateInternal,
+  player: PlayerState,
+  card: Card,
+  handBefore: Card[],
+  options: { resetStackFromJumpIn?: boolean } = {}
+): void {
   if (card.value === "skip") {
     const skipped = findPlayerBySeat(state, seatAfter(state, player.seat));
     pushLog(state, "skip", `${skipped.nickname} was skipped.`);
@@ -931,7 +980,19 @@ function applyPlayedCard(state: GameStateInternal, player: PlayerState, card: Ca
 
   if (card.value === "wild4") {
     if (state.settings.stackingEnabled) {
-      startStack(state, player, "wild4", 4);
+      const previousColor = colorBeforeWild(state);
+      startStack(
+        state,
+        player,
+        "wild4",
+        4,
+        state.settings.challengeEnabled && !options.resetStackFromJumpIn
+          ? {
+              declaredColor: state.activeColor ?? "red",
+              guilty: previousColor ? handBefore.some((item) => item.color === previousColor) : false
+            }
+          : undefined
+      );
       return;
     }
 
@@ -964,7 +1025,13 @@ function applyPlayedCard(state: GameStateInternal, player: PlayerState, card: Ca
   advanceTurn(state);
 }
 
-function startStack(state: GameStateInternal, player: PlayerState, kind: PendingStack["kind"], amount: number): void {
+function startStack(
+  state: GameStateInternal,
+  player: PlayerState,
+  kind: PendingStack["kind"],
+  amount: number,
+  challenge?: { declaredColor: Color; guilty: boolean }
+): void {
   const stackedOut = player.hand.length === 0;
   if (stackedOut && isLastStand(state)) {
     finishLastStandPlayer(state, player.id);
@@ -975,12 +1042,30 @@ function startStack(state: GameStateInternal, player: PlayerState, kind: Pending
     kind,
     targetPlayerId: target.id,
     totalDraw: amount,
+    ...(challenge
+      ? {
+          challengeable: true,
+          offenderId: player.id,
+          declaredColor: challenge.declaredColor,
+          guilty: challenge.guilty
+        }
+      : {}),
     ...(!isLastStand(state) && stackedOut ? { roundWinnerId: player.id } : {})
   };
+  if (challenge) {
+    state.pendingChallenge = {
+      offenderId: player.id,
+      challengerId: target.id,
+      declaredColor: challenge.declaredColor,
+      guilty: challenge.guilty
+    };
+  }
   state.currentSeat = target.seat;
   setTurnDeadline(state);
-  pushLog(state, "draw", `${target.nickname} must stack or draw ${amount} cards.`);
-  settlePendingStackIfUnstackable(state);
+  pushLog(state, challenge ? "wild" : "draw", `${target.nickname} must ${challenge ? "choose: challenge, stack, or accept" : "stack or draw"} ${amount} cards.`);
+  if (!challenge) {
+    settlePendingStackIfUnstackable(state);
+  }
 }
 
 function applyStackedCard(state: GameStateInternal, player: PlayerState, card: Card): void {
@@ -997,10 +1082,14 @@ function applyStackedCard(state: GameStateInternal, player: PlayerState, card: C
 
   const target = findPlayerBySeat(state, seatAfter(state, player.seat));
   const roundWinnerId = stack.roundWinnerId ?? (!isLastStand(state) && stackedOut ? player.id : undefined);
+  if (stack.challengeable) {
+    delete state.pendingChallenge;
+  }
   state.pendingStack = {
     kind: stack.kind,
     targetPlayerId: target.id,
     totalDraw: stack.totalDraw + amount,
+    challengeable: false,
     ...(roundWinnerId ? { roundWinnerId } : {})
   };
   state.currentSeat = target.seat;
@@ -1042,7 +1131,7 @@ function canPlayerStack(player: PlayerState, stack: PendingStack): boolean {
 
 function settlePendingStackIfUnstackable(state: GameStateInternal): boolean {
   const stack = state.pendingStack;
-  if (!stack || state.pendingOneCall || hasActiveOneWindow(state)) {
+  if (!stack || stack.challengeable || state.pendingOneCall || hasActiveOneWindow(state)) {
     return false;
   }
 
@@ -1062,13 +1151,18 @@ function stackDrawAmount(card: Card): number | null {
 }
 
 function canJumpIn(state: GameStateInternal, player: PlayerState, cardId: string): boolean {
-  if (!state.settings.jumpInEnabled || state.pendingStack || player.drawnCardId || player.finishedRank) {
+  if (!state.settings.jumpInEnabled || state.pendingChallenge || player.drawnCardId || player.finishedRank) {
     return false;
   }
 
   const discardTop = topDiscard(state);
   const card = player.hand.find((item) => item.id === cardId);
-  return Boolean(card && discardTop && card.value === discardTop.value && card.color === discardTop.color);
+  const exactMatch = Boolean(card && discardTop && card.value === discardTop.value && card.color === discardTop.color);
+  if (!exactMatch || !card) {
+    return false;
+  }
+
+  return state.pendingStack ? stackDrawAmount(card) !== null : true;
 }
 
 function updateOneWindowAfterPlay(state: GameStateInternal, player: PlayerState): void {
@@ -1385,6 +1479,7 @@ function connectPlayer(state: GameStateInternal, player: PlayerState): void {
   player.missedDisconnectedTurns = 0;
   player.autoPlay = false;
   assignHost(state);
+  syncPauseState(state);
   if (!wasConnected) {
     pushLog(state, "room", `${player.nickname} reconnected.`);
   }
@@ -1453,6 +1548,10 @@ function rebindPlayerSession(state: GameStateInternal, oldId: string, newId: str
 
   if (state.pendingStack?.targetPlayerId === oldId) {
     state.pendingStack.targetPlayerId = newId;
+  }
+
+  if (state.pendingStack?.offenderId === oldId) {
+    state.pendingStack.offenderId = newId;
   }
 
   if (state.pendingStack?.roundWinnerId === oldId) {
@@ -1615,12 +1714,72 @@ function randomColor(): Color {
 }
 
 function setTurnDeadline(state: GameStateInternal): void {
+  const pause = syncPauseState(state);
+  if (pause.paused) {
+    return;
+  }
+
   state.turnDeadline = Date.now() + state.settings.turnTimeoutSec * 1000;
+}
+
+function syncPauseState(state: GameStateInternal): { paused: boolean; changed: boolean } {
+  if (state.phase !== "playing") {
+    const changed = Boolean(state.pauseReason);
+    delete state.pauseReason;
+    return { paused: false, changed };
+  }
+
+  if (availablePlayers(state).length < 2) {
+    const changed = state.pauseReason !== "notEnoughAvailablePlayers" || state.turnDeadline !== undefined;
+    if (!state.pauseReason) {
+      pushLog(state, "room", "Game paused until at least two active players return.");
+    }
+    state.pauseReason = "notEnoughAvailablePlayers";
+    delete state.turnDeadline;
+    return { paused: true, changed };
+  }
+
+  if (state.pauseReason) {
+    delete state.pauseReason;
+    if (!isAvailablePlayer(currentPlayer(state))) {
+      state.currentSeat = nextAvailableSeatAfter(state, state.currentSeat);
+    }
+    state.turnDeadline = Date.now() + state.settings.turnTimeoutSec * 1000;
+    pushLog(state, "room", "Game resumed.");
+    return { paused: false, changed: true };
+  }
+
+  return { paused: false, changed: false };
+}
+
+function availablePlayers(state: GameStateInternal): PlayerState[] {
+  return activePlayers(state).filter(isAvailablePlayer);
+}
+
+function isAvailablePlayer(player: PlayerState): boolean {
+  return player.connected && !player.away && !player.finishedRank;
+}
+
+function nextAvailableSeatAfter(state: GameStateInternal, seat: number): number {
+  const players = availablePlayers(state);
+  if (players.length === 0) {
+    return seat;
+  }
+
+  const ordered = state.direction === 1 ? players : [...players].reverse();
+  const next = ordered.find((player) => (state.direction === 1 ? player.seat > seat : player.seat < seat));
+  return (next ?? ordered[0])!.seat;
 }
 
 function ensurePlaying(state: GameStateInternal): void {
   if (state.phase !== "playing") {
     throw new GameError("not_playing", "The game is not currently playing.");
+  }
+}
+
+function ensureNotPaused(state: GameStateInternal): void {
+  if (syncPauseState(state).paused) {
+    throw new GameError("game_paused", "The game is paused until at least two active players return.");
   }
 }
 

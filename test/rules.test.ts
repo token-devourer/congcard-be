@@ -398,9 +398,10 @@ describe("standard mode", () => {
   });
 
   it("enables immediate auto turns after two disconnected misses", () => {
-    const state = controlledGame();
+    const state = controlledGame3();
     state.players[0]!.hand = [card("red-9", "red", 9)];
     state.players[1]!.hand = [card("blue-8", "blue", 8)];
+    state.players[2]!.hand = [card("green-7", "green", 7)];
     setPlayerConnected(state, "p1", false);
 
     state.currentSeat = 0;
@@ -424,11 +425,12 @@ describe("standard mode", () => {
   });
 
   it("auto-accepts a disconnected challenge turn once auto play is enabled", () => {
-    const state = controlledGame();
+    const state = controlledGame3();
     state.players[0]!.hand = [card("red-9", "red", 9)];
     state.players[1]!.connected = false;
     state.players[1]!.autoPlay = true;
     state.players[1]!.hand = [card("green-8", "green", 8)];
+    state.players[2]!.hand = [card("blue-7", "blue", 7)];
     state.pendingChallenge = { offenderId: "p1", challengerId: "p2", declaredColor: "blue", guilty: false };
     state.currentSeat = 1;
 
@@ -436,12 +438,14 @@ describe("standard mode", () => {
 
     expect(state.pendingChallenge).toBeUndefined();
     expect(state.players[1]!.hand).toHaveLength(5);
-    expect(snapshotFor(state).currentPlayerId).toBe("p1");
+    expect(snapshotFor(state).currentPlayerId).toBe("p3");
   });
 
   it("auto plays immediately for away players while keeping them connected", () => {
-    const state = controlledGame();
+    const state = controlledGame3();
     state.players[0]!.hand = [card("red-9", "red", 9)];
+    state.players[1]!.hand = [card("blue-8", "blue", 8)];
+    state.players[2]!.hand = [card("green-7", "green", 7)];
     setPlayerAway(state, "p1", true);
 
     expect(state.players[0]!).toMatchObject({ connected: true, away: true, autoPlay: true });
@@ -454,9 +458,10 @@ describe("standard mode", () => {
   });
 
   it("auto-accepts an away challenge turn", () => {
-    const state = controlledGame();
+    const state = controlledGame3();
     state.players[0]!.hand = [card("red-9", "red", 9)];
     state.players[1]!.hand = [card("green-8", "green", 8)];
+    state.players[2]!.hand = [card("blue-7", "blue", 7)];
     setPlayerAway(state, "p2", true);
     state.pendingChallenge = { offenderId: "p1", challengerId: "p2", declaredColor: "blue", guilty: false };
     state.currentSeat = 1;
@@ -465,7 +470,7 @@ describe("standard mode", () => {
 
     expect(state.pendingChallenge).toBeUndefined();
     expect(state.players[1]!.hand).toHaveLength(5);
-    expect(snapshotFor(state).currentPlayerId).toBe("p1");
+    expect(snapshotFor(state).currentPlayerId).toBe("p3");
   });
 
   it("resolves Wild Draw Four without challenge when disabled", () => {
@@ -725,6 +730,98 @@ describe("standard mode", () => {
     expect(snapshotFor(state).currentPlayerId).toBe("p1");
   });
 
+  it("opens a challengeable stack for the first Wild Draw Four", () => {
+    const state = controlledGame3();
+    state.settings.stackingEnabled = true;
+    state.settings.challengeEnabled = true;
+    state.players[0]!.hand = [card("p1-wild4", null, "wild4"), card("p1-red-9", "red", 9), card("p1-blue-1", "blue", 1)];
+    state.players[1]!.hand = [card("p2-wild4", null, "wild4"), card("p2-blue-1", "blue", 1)];
+    state.players[2]!.hand = [card("p3-green-8", "green", 8)];
+
+    playCard(state, "p1", "p1-wild4", "blue");
+
+    expect(state.pendingStack).toMatchObject({
+      kind: "wild4",
+      targetPlayerId: "p2",
+      totalDraw: 4,
+      challengeable: true,
+      offenderId: "p1",
+      declaredColor: "blue",
+      guilty: true
+    });
+    expect(state.pendingChallenge).toMatchObject({ offenderId: "p1", challengerId: "p2", guilty: true });
+  });
+
+  it("lets the affected player challenge the first Wild Draw Four while stacking is enabled", () => {
+    const state = controlledGame3();
+    state.settings.stackingEnabled = true;
+    state.settings.challengeEnabled = true;
+    state.players[0]!.hand = [card("p1-wild4", null, "wild4"), card("p1-red-9", "red", 9), card("p1-blue-1", "blue", 1)];
+    state.players[1]!.hand = [card("p2-blue-1", "blue", 1)];
+    state.players[2]!.hand = [card("p3-green-8", "green", 8)];
+
+    playCard(state, "p1", "p1-wild4", "blue");
+    resolveChallenge(state, "p2", true);
+
+    expect(state.pendingChallenge).toBeUndefined();
+    expect(state.pendingStack).toBeUndefined();
+    expect(state.players[0]!.hand).toHaveLength(6);
+    expect(snapshotFor(state).currentPlayerId).toBe("p2");
+  });
+
+  it("lets stacking replace the first Wild Draw Four challenge choice", () => {
+    const state = controlledGame3();
+    state.settings.stackingEnabled = true;
+    state.settings.challengeEnabled = true;
+    state.players[0]!.hand = [card("p1-wild4", null, "wild4"), card("p1-red-9", "red", 9), card("p1-blue-1", "blue", 1)];
+    state.players[1]!.hand = [card("p2-wild4", null, "wild4"), card("p2-blue-1", "blue", 1), card("p2-yellow-2", "yellow", 2)];
+    state.players[2]!.hand = [card("p3-wild4", null, "wild4"), card("p3-green-8", "green", 8)];
+
+    playCard(state, "p1", "p1-wild4", "blue");
+    playCard(state, "p2", "p2-wild4", "green");
+
+    expect(state.pendingChallenge).toBeUndefined();
+    expect(state.pendingStack).toMatchObject({ kind: "wild4", targetPlayerId: "p3", totalDraw: 8, challengeable: false });
+    expect(() => resolveChallenge(state, "p3", true)).toThrow("There is no Wild Draw Four");
+  });
+
+  it("lets Jump In reset a Draw Two stack", () => {
+    const state = controlledGame3();
+    state.settings.stackingEnabled = true;
+    state.settings.jumpInEnabled = true;
+    state.players[0]!.hand = [card("p1-red-draw2", "red", "draw2"), card("p1-blue-draw2", "blue", "draw2"), card("p1-red-9", "red", 9)];
+    state.players[1]!.hand = [card("p2-blue-draw2", "blue", "draw2"), card("p2-yellow-draw2", "yellow", "draw2"), card("p2-blue-1", "blue", 1)];
+    state.players[2]!.hand = [card("p3-green-draw2", "green", "draw2")];
+
+    playCard(state, "p1", "p1-red-draw2");
+    playCard(state, "p2", "p2-blue-draw2");
+    expect(state.pendingStack).toMatchObject({ targetPlayerId: "p3", totalDraw: 4 });
+
+    playCard(state, "p1", "p1-blue-draw2");
+
+    expect(state.pendingStack).toMatchObject({ kind: "draw2", targetPlayerId: "p2", totalDraw: 2 });
+  });
+
+  it("lets Jump In reset a Wild Draw Four stack without reopening challenge", () => {
+    const state = controlledGame3();
+    state.settings.stackingEnabled = true;
+    state.settings.challengeEnabled = true;
+    state.settings.jumpInEnabled = true;
+    state.players[0]!.hand = [card("p1-wild4-a", null, "wild4"), card("p1-wild4-b", null, "wild4"), card("p1-red-9", "red", 9), card("p1-blue-1", "blue", 1)];
+    state.players[1]!.hand = [card("p2-wild4-a", null, "wild4"), card("p2-wild4-b", null, "wild4"), card("p2-blue-1", "blue", 1)];
+    state.players[2]!.hand = [card("p3-wild4", null, "wild4"), card("p3-green-8", "green", 8)];
+
+    playCard(state, "p1", "p1-wild4-a", "blue");
+    playCard(state, "p2", "p2-wild4-a", "green");
+    expect(state.pendingStack).toMatchObject({ targetPlayerId: "p3", totalDraw: 8, challengeable: false });
+
+    playCard(state, "p1", "p1-wild4-b", "red");
+
+    expect(state.pendingChallenge).toBeUndefined();
+    expect(state.pendingStack).toMatchObject({ kind: "wild4", targetPlayerId: "p2", totalDraw: 4 });
+    expect(state.pendingStack?.challengeable).not.toBe(true);
+  });
+
   it("auto-applies a stack when the target has no matching draw card", () => {
     const state = controlledGame3();
     state.settings.stackingEnabled = true;
@@ -751,6 +848,28 @@ describe("standard mode", () => {
     expect(state.pendingStack).toMatchObject({ targetPlayerId: "p2", totalDraw: 2 });
     expect(() => drawCard(state, "p2")).toThrow("matching draw card");
     expect(state.players[1]!.hand).toHaveLength(2);
+  });
+
+  it("pauses auto turns when fewer than two active players are available and resumes when one returns", () => {
+    const state = controlledGame3();
+    state.turnDeadline = Date.now() + 30_000;
+    state.players[0]!.hand = [card("p1-red-9", "red", 9)];
+    state.players[1]!.hand = [card("p2-blue-8", "blue", 8)];
+    state.players[2]!.hand = [card("p3-green-7", "green", 7)];
+
+    setPlayerAway(state, "p2", true);
+    expect(state.pauseReason).toBeUndefined();
+
+    setPlayerAway(state, "p3", true);
+    expect(state.pauseReason).toBe("notEnoughAvailablePlayers");
+    expect(state.turnDeadline).toBeUndefined();
+    expect(resolveAutomatedTurns(state)).toBe(false);
+    expect(state.players[1]!.hand).toHaveLength(1);
+    expect(state.players[2]!.hand).toHaveLength(1);
+
+    setPlayerAway(state, "p2", false);
+    expect(state.pauseReason).toBeUndefined();
+    expect(state.turnDeadline).toBeDefined();
   });
 
   it("plays a deterministic action-card sequence without stale One/Catch state", () => {
