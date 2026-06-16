@@ -407,7 +407,9 @@ describe("standard mode", () => {
 
   it("enables immediate auto turns after two disconnected misses", () => {
     const state = controlledGame3();
-    state.players[0]!.hand = [card("red-9", "red", 9)];
+    // Unplayable hand (active color is red, top is a red 5) so the auto turn
+    // falls back to drawing rather than playing a match.
+    state.players[0]!.hand = [card("green-8", "green", 8)];
     state.players[1]!.hand = [card("blue-8", "blue", 8)];
     state.players[2]!.hand = [card("green-7", "green", 7)];
     setPlayerConnected(state, "p1", false);
@@ -451,7 +453,9 @@ describe("standard mode", () => {
 
   it("auto plays immediately for away players while keeping them connected", () => {
     const state = controlledGame3();
-    state.players[0]!.hand = [card("red-9", "red", 9)];
+    // Unplayable hand so the away auto turn draws (covered by away-autoplay
+    // tests for the play-a-match path).
+    state.players[0]!.hand = [card("green-8", "green", 8)];
     state.players[1]!.hand = [card("blue-8", "blue", 8)];
     state.players[2]!.hand = [card("green-7", "green", 7)];
     setPlayerAway(state, "p1", true);
@@ -698,7 +702,14 @@ describe("standard mode", () => {
 
     startRound(state);
 
-    expect(state.drawPile).toHaveLength(180);
+    // Two deck boxes = 216 cards. Assert conservation rather than an exact
+    // draw-pile size, since a Draw Two opener legitimately deals two extra cards.
+    const totalCards =
+      state.drawPile.length +
+      state.discardPile.length +
+      state.players.reduce((sum, player) => sum + player.hand.length, 0);
+    expect(totalCards).toBe(216);
+    expect(state.players.every((player) => player.hand.length >= 7)).toBe(true);
   });
 
   it("allows jump in with an exact matching card when enabled", () => {

@@ -55,6 +55,9 @@ export class GameRoom extends Room {
   maxClients = 40;
   private game!: GameStateInternal;
   private readonly clientRateBuckets = new Map<string, ClientRateBucket>();
+  // Pings change constantly; coalesce them into the next ticker broadcast
+  // instead of fanning out a full snapshot on every ping message.
+  private pingDirty = false;
 
   onCreate(options: GameRoomOptions): void {
     const settings = roomSettingsUpdateSchema.parse(options.settings ?? {});
@@ -68,7 +71,14 @@ export class GameRoom extends Room {
         const autoPlayedBeforeTimeout = resolveAutomatedTurns(this.game);
         const timedOut = handleTurnTimeout(this.game);
         const autoPlayedAfterTimeout = resolveAutomatedTurns(this.game);
-        if (oneCallResolved || windowClosed || autoPlayedBeforeTimeout || timedOut || autoPlayedAfterTimeout) {
+        if (
+          oneCallResolved ||
+          windowClosed ||
+          autoPlayedBeforeTimeout ||
+          timedOut ||
+          autoPlayedAfterTimeout ||
+          this.pingDirty
+        ) {
           this.broadcastState();
         }
       } catch {
@@ -151,11 +161,19 @@ export class GameRoom extends Room {
     }));
 
     this.onMessage("room.ping", (client, message) => {
-      const ping = typeof message?.ping === "number" ? Math.round(Math.max(0, message.ping)) : 0;
+      // Silently drop floods: an abusive client must not be able to amplify
+      // pings into snapshot fan-out. Legitimate pings (~1/s) are well under cap.
+      if (!this.allowClientMessage(client)) {
+        return;
+      }
+
+      const ping = typeof message?.ping === "number" ? Math.round(Math.max(0, Math.min(message.ping, 60_000))) : 0;
       const player = this.game.players.find((p) => p.id === client.sessionId);
-      if (player) {
+      if (player && player.ping !== ping) {
         player.ping = ping;
-        this.broadcastState();
+        // Mark dirty; the 100ms ticker flushes it, bounding ping-driven
+        // broadcasts to the tick rate regardless of client count.
+        this.pingDirty = true;
       }
     });
   }
@@ -204,6 +222,8 @@ export class GameRoom extends Room {
   }
 
   private broadcastState(): void {
+    // Any full broadcast already carries the latest pings, so clear the flag.
+    this.pingDirty = false;
     for (const client of this.clients) {
       client.send("state", snapshotFor(this.game, client.sessionId));
     }

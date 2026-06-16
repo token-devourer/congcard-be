@@ -409,7 +409,13 @@ export function startRound(state: GameStateInternal): void {
   pushLog(state, "round", `Round ${state.roundNumber} started.`);
 }
 
-export function playCard(state: GameStateInternal, playerId: string, cardId: string, declaredColor?: Color): void {
+export function playCard(
+  state: GameStateInternal,
+  playerId: string,
+  cardId: string,
+  declaredColor?: Color,
+  automated = false
+): void {
   ensurePlaying(state);
   ensureNoPendingOneCall(state);
   ensureNotPaused(state);
@@ -417,7 +423,9 @@ export function playCard(state: GameStateInternal, playerId: string, cardId: str
   const current = currentPlayer(state);
   let player = current.id === playerId ? current : findPlayer(state, playerId);
   const actingOutOfTurn = current.id !== playerId;
-  ensurePlayerInteractive(player);
+  if (!automated) {
+    ensurePlayerInteractive(player);
+  }
   const jumpingIn = actingOutOfTurn && canJumpIn(state, player, cardId);
   const jumpingIntoStack = Boolean(jumpingIn && state.pendingStack);
 
@@ -502,7 +510,7 @@ export function playCard(state: GameStateInternal, playerId: string, cardId: str
   }
 }
 
-export function drawCard(state: GameStateInternal, playerId: string): void {
+export function drawCard(state: GameStateInternal, playerId: string, automated = false): void {
   ensurePlaying(state);
   ensureNoPendingOneCall(state);
   ensureNotPaused(state);
@@ -514,7 +522,9 @@ export function drawCard(state: GameStateInternal, playerId: string): void {
     throw new GameError("not_your_turn", "It is not your turn.");
   }
 
-  ensurePlayerInteractive(player);
+  if (!automated) {
+    ensurePlayerInteractive(player);
+  }
 
   if (player.drawnCardId) {
     throw new GameError("already_drew", "You already drew a card this turn.");
@@ -581,11 +591,13 @@ export function playDrawn(state: GameStateInternal, playerId: string, play: bool
   advanceTurn(state);
 }
 
-export function callOne(state: GameStateInternal, playerId: string): void {
+export function callOne(state: GameStateInternal, playerId: string, automated = false): void {
   ensurePlaying(state);
   ensureNotPaused(state);
   const player = findPlayer(state, playerId);
-  ensurePlayerInteractive(player);
+  if (!automated) {
+    ensurePlayerInteractive(player);
+  }
   const oneWindow = state.oneWindow;
   const now = Date.now();
 
@@ -602,6 +614,16 @@ export function callOne(state: GameStateInternal, playerId: string): void {
     now > oneWindow.deadline
   ) {
     throw new GameError("cannot_call_one", "You can only call One while your One window is open.");
+  }
+
+  // Auto-called One (away/disconnected): finalize immediately and close the
+  // window so an absent player cannot be caught while the bot covers for them.
+  if (automated) {
+    player.calledOne = true;
+    delete state.oneWindow;
+    delete state.pendingOneCall;
+    pushLog(state, "one", `${player.nickname} called One.`);
+    return;
   }
 
   // Do not finalize instantly: give catch packets that were already in flight
@@ -879,11 +901,33 @@ export function resolveAutomatedTurns(state: GameStateInternal): boolean {
   }
 
   let changed = false;
-  const limit = state.players.length + 5;
+  // Allow extra iterations beyond one-per-player so a chain of auto turns can
+  // also fit the auto-One call and auto-stack steps without stalling a tick.
+  const limit = state.players.length * 2 + 5;
 
   for (let count = 0; count < limit; count += 1) {
     if (state.phase !== "playing" || state.pendingOneCall) {
       return changed;
+    }
+
+    // Auto-call One for an away/disconnected auto player once their window is
+    // open, so they are not left catchable while the bot covers their hand.
+    const ow = state.oneWindow;
+    if (ow) {
+      const owner = state.players.find((item) => item.id === ow.playerId);
+      const nowTs = Date.now();
+      if (
+        owner &&
+        isAutoControllable(owner) &&
+        !owner.calledOne &&
+        owner.hand.length === 1 &&
+        nowTs >= ow.opensAt &&
+        nowTs <= ow.deadline
+      ) {
+        callOne(state, owner.id, true);
+        changed = true;
+        continue;
+      }
     }
 
     if (hasActiveOneWindow(state)) {
@@ -913,7 +957,15 @@ export function resolveAutomatedTurns(state: GameStateInternal): boolean {
         return changed;
       }
 
-      resolveStackDraw(state, player);
+      // Stack a matching draw card when held; otherwise eat the pile.
+      const stackCardId = autoStackCardId(player, state.pendingStack);
+      if (stackCardId) {
+        const stackCard = player.hand.find((item) => item.id === stackCardId)!;
+        const declaredColor = needsDeclaredColor(stackCard) ? chooseAutoColor(player, stackCardId) : undefined;
+        playCard(state, player.id, stackCardId, declaredColor, true);
+      } else {
+        resolveStackDraw(state, player);
+      }
       changed = true;
       continue;
     }
@@ -922,7 +974,7 @@ export function resolveAutomatedTurns(state: GameStateInternal): boolean {
       return changed;
     }
 
-    autoDrawAndPass(state, player);
+    autoPlayTurn(state, player);
     changed = true;
   }
 
@@ -1620,22 +1672,102 @@ function isAutoControllable(player: PlayerState): boolean {
   return player.autoPlay && !player.finishedRank && (!player.connected || player.away);
 }
 
-function autoDrawAndPass(state: GameStateInternal, player: PlayerState): void {
+function autoPlayTurn(state: GameStateInternal, player: PlayerState): void {
   if (player.finishedRank) {
     advanceTurn(state);
     return;
   }
 
-  if (player.drawnCardId) {
-    delete player.drawnCardId;
-    pushLog(state, "draw", `${player.nickname} auto-passed ${autoPlayReason(player)}.`);
-  } else {
-    drawMany(state, player, 1);
-    delete player.drawnCardId;
-    pushLog(state, "draw", `${player.nickname} auto-drew one card ${autoPlayReason(player)}.`);
+  // Normal turn: play the best matching card if one exists.
+  if (!player.drawnCardId) {
+    const pick = pickAutoPlay(state, player);
+    if (pick) {
+      playCard(state, player.id, pick.cardId, pick.declaredColor, true);
+      return;
+    }
+
+    // Nothing playable: pull one card. drawCard auto-passes a dead card (and
+    // advances the turn); a live drawn card is left pending and played below.
+    drawCard(state, player.id, true);
   }
 
+  if (!player.drawnCardId) {
+    return;
+  }
+
+  const drawn = player.hand.find((item) => item.id === player.drawnCardId);
+  if (drawn && autoCardPlayable(state, player, drawn)) {
+    const declaredColor = needsDeclaredColor(drawn) ? chooseAutoColor(player, drawn.id) : undefined;
+    playCard(state, player.id, player.drawnCardId, declaredColor, true);
+    return;
+  }
+
+  delete player.drawnCardId;
+  pushLog(state, "draw", `${player.nickname} auto-passed ${autoPlayReason(player)}.`);
   advanceTurn(state);
+}
+
+function pickAutoPlay(
+  state: GameStateInternal,
+  player: PlayerState
+): { cardId: string; declaredColor?: Color } | undefined {
+  const playable = player.hand.filter((card) => autoCardPlayable(state, player, card));
+  if (playable.length === 0) {
+    return undefined;
+  }
+
+  // Conserve wilds: prefer colored matches, then Wild, then Wild Draw Four.
+  const rank = (card: Card): number => (card.value === "wild4" ? 2 : card.value === "wild" ? 1 : 0);
+  const chosen = [...playable].sort((a, b) => rank(a) - rank(b))[0]!;
+  return {
+    cardId: chosen.id,
+    ...(needsDeclaredColor(chosen) ? { declaredColor: chooseAutoColor(player, chosen.id) } : {})
+  };
+}
+
+function autoCardPlayable(state: GameStateInternal, player: PlayerState, card: Card): boolean {
+  const activeColor = state.activeColor;
+  if (!activeColor) {
+    return false;
+  }
+
+  return getMode(state.settings).isPlayable(card, {
+    playerId: player.id,
+    activeColor,
+    discardTop: topDiscard(state),
+    hand: player.hand,
+    playerCount: activePlayers(state).length
+  });
+}
+
+function autoStackCardId(player: PlayerState, stack: PendingStack): string | undefined {
+  return player.hand.find((card) => canStackCard(card, stack))?.id;
+}
+
+function needsDeclaredColor(card: Card): boolean {
+  return card.value === "wild" || card.value === "wild4";
+}
+
+function chooseAutoColor(player: PlayerState, excludeCardId?: string): Color {
+  const counts = new Map<Color, number>();
+  for (const card of player.hand) {
+    if (card.id === excludeCardId || !card.color) {
+      continue;
+    }
+    counts.set(card.color, (counts.get(card.color) ?? 0) + 1);
+  }
+
+  let best: Color | undefined;
+  let bestCount = 0;
+  for (const color of COLORS) {
+    const count = counts.get(color) ?? 0;
+    if (count > bestCount) {
+      bestCount = count;
+      best = color;
+    }
+  }
+
+  return best ?? randomColor();
 }
 
 function autoPlayReason(player: PlayerState): string {
