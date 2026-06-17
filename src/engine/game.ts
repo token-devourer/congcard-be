@@ -968,7 +968,7 @@ export function resolveAutomatedTurns(state: GameStateInternal): boolean {
       if (nowStack - state.autoPlayPendingAt < 1000) {
         return true;
       }
-      state.autoPlayPendingAt = undefined;
+      delete state.autoPlayPendingAt;
 
       // Stack a matching draw card when held; otherwise eat the pile.
       const stackCardId = autoStackCardId(player, state.pendingStack);
@@ -984,7 +984,7 @@ export function resolveAutomatedTurns(state: GameStateInternal): boolean {
     }
 
     if (!isAutoControllable(player)) {
-      state.autoPlayPendingAt = undefined;
+      delete state.autoPlayPendingAt;
       return changed;
     }
 
@@ -997,7 +997,7 @@ export function resolveAutomatedTurns(state: GameStateInternal): boolean {
     if (nowPlay - state.autoPlayPendingAt < 1000) {
       return true;
     }
-    state.autoPlayPendingAt = undefined;
+    delete state.autoPlayPendingAt;
 
     autoPlayTurn(state, player);
     changed = true;
@@ -1499,7 +1499,7 @@ function reshuffleDiscard(state: GameStateInternal): void {
 
 function advanceTurn(state: GameStateInternal, skippedPlayers = 0): void {
   state.currentSeat = seatAfter(state, state.currentSeat, skippedPlayers + 1);
-  state.autoPlayPendingAt = undefined;
+  delete state.autoPlayPendingAt;
   setTurnDeadline(state);
 }
 
