@@ -508,7 +508,7 @@ export function playCard(
   if (stacking) {
     applyStackedCard(state, player, card);
   } else {
-    applyPlayedCard(state, player, card, handBefore, { resetStackFromJumpIn: jumpingIntoStack });
+    applyPlayedCard(state, player, card, handBefore, { resetStackFromJumpIn: jumpingIntoStack, prevColor: activeColor });
   }
 
   if (!state.pendingChallenge && !state.pendingStack && player.hand.length === 0) {
@@ -1025,7 +1025,7 @@ function applyPlayedCard(
   player: PlayerState,
   card: Card,
   handBefore: Card[],
-  options: { resetStackFromJumpIn?: boolean } = {}
+  options: { resetStackFromJumpIn?: boolean; prevColor?: Color } = {}
 ): void {
   if (card.value === "skip") {
     const skipped = findPlayerBySeat(state, seatAfter(state, player.seat));
@@ -1057,7 +1057,7 @@ function applyPlayedCard(
 
   if (card.value === "wild4") {
     if (state.settings.stackingEnabled) {
-      const previousColor = colorBeforeWild(state);
+      const previousColor = options.prevColor;
       startStack(
         state,
         player,
@@ -1074,7 +1074,7 @@ function applyPlayedCard(
     }
 
     const target = findPlayerBySeat(state, seatAfter(state, player.seat));
-    const previousColor = colorBeforeWild(state);
+    const previousColor = options.prevColor;
     if (!state.settings.challengeEnabled) {
       drawMany(state, target, 4);
       state.currentSeat = seatAfter(state, target.seat);
@@ -1871,17 +1871,6 @@ function topDiscard(state: GameStateInternal): Card {
   }
 
   return card;
-}
-
-function colorBeforeWild(state: GameStateInternal): Color | undefined {
-  for (let index = state.discardPile.length - 2; index >= 0; index -= 1) {
-    const card = state.discardPile[index];
-    if (card?.color) {
-      return card.color;
-    }
-  }
-
-  return state.activeColor;
 }
 
 function randomColor(): Color {

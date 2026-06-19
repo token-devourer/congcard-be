@@ -961,4 +961,49 @@ describe("standard mode", () => {
     expect(snapshotFor(state).currentPlayerId).toBe("p1");
     expect(state.oneWindow).toBeUndefined();
   });
+
+  it("judges a Wild Draw Four played over a declared color by that color, not a buried card", () => {
+    const state = controlledGame();
+    // A previous Wild declared blue on top of a buried red card. The discard
+    // card itself stays colorless; the active color lives only in state.
+    state.discardPile = [card("buried-red-5", "red", 5), card("prev-wild", null, "wild")];
+    state.activeColor = "blue";
+    // p1 holds a red card (matches the BURIED color) but NO blue (the real
+    // active color), so the Wild Draw Four is legal.
+    state.players[0]!.hand = [card("p1-wild4", null, "wild4"), card("p1-red-9", "red", 9), card("p1-green-2", "green", 2)];
+    state.players[1]!.hand = [card("p2-yellow-7", "yellow", 7)];
+
+    playCard(state, "p1", "p1-wild4", "green");
+
+    expect(state.pendingChallenge).toMatchObject({ offenderId: "p1", challengerId: "p2", guilty: false });
+  });
+
+  it("flags a Wild Draw Four guilty when the player holds the declared active color", () => {
+    const state = controlledGame();
+    state.discardPile = [card("buried-red-5", "red", 5), card("prev-wild", null, "wild")];
+    state.activeColor = "blue";
+    // p1 holds a blue card (the real active color) → illegal Wild Draw Four.
+    state.players[0]!.hand = [card("p1-wild4", null, "wild4"), card("p1-blue-1", "blue", 1), card("p1-green-2", "green", 2)];
+    state.players[1]!.hand = [card("p2-yellow-7", "yellow", 7)];
+
+    playCard(state, "p1", "p1-wild4", "green");
+
+    expect(state.pendingChallenge).toMatchObject({ offenderId: "p1", challengerId: "p2", guilty: true });
+  });
+
+  it("computes stack guilt from the active color when the first Wild Draw Four lands on a declared color", () => {
+    const state = controlledGame3();
+    state.settings.stackingEnabled = true;
+    state.settings.challengeEnabled = true;
+    state.discardPile = [card("buried-red-5", "red", 5), card("prev-wild", null, "wild")];
+    state.activeColor = "blue";
+    state.players[0]!.hand = [card("p1-wild4", null, "wild4"), card("p1-red-9", "red", 9), card("p1-green-2", "green", 2)];
+    state.players[1]!.hand = [card("p2-wild4", null, "wild4"), card("p2-blue-1", "blue", 1)];
+    state.players[2]!.hand = [card("p3-green-8", "green", 8)];
+
+    playCard(state, "p1", "p1-wild4", "green");
+
+    expect(state.pendingStack).toMatchObject({ challengeable: true, offenderId: "p1", guilty: false });
+    expect(state.pendingChallenge).toMatchObject({ offenderId: "p1", challengerId: "p2", guilty: false });
+  });
 });
