@@ -1071,6 +1071,37 @@ describe("standard mode", () => {
     expect(snapshotFor(state).currentPlayerId).toBe("p2");
   });
 
+  it("lets a Wild Draw Four batch answer and close the first challengeable stack", () => {
+    const state = controlledGame3();
+    state.settings.batchEnabled = true;
+    state.settings.stackingEnabled = true;
+    state.settings.challengeEnabled = true;
+    state.players[0]!.hand = [card("p1-wild4", null, "wild4"), card("p1-red-9", "red", 9), card("p1-blue-1", "blue", 1)];
+    state.players[1]!.hand = [
+      card("p2-wild4-a", null, "wild4"),
+      card("p2-wild4-b", null, "wild4"),
+      card("p2-green-1", "green", 1)
+    ];
+    state.players[2]!.hand = [card("p3-yellow-8", "yellow", 8)];
+
+    playCard(state, "p1", "p1-wild4", "blue");
+    expect(state.pendingChallenge).toMatchObject({ offenderId: "p1", challengerId: "p2" });
+    expect(state.pendingStack).toMatchObject({ targetPlayerId: "p2", totalDraw: 4, challengeable: true });
+
+    playBatch(state, "p2", ["p2-wild4-a", "p2-wild4-b"], "green");
+    state.pendingBatchPlay!.resolvesAt = Date.now() - 1;
+    resolvePendingBatchPlay(state);
+
+    expect(state.pendingChallenge).toBeUndefined();
+    expect(state.pendingStack).toMatchObject({
+      kind: "wild4",
+      targetPlayerId: "p3",
+      totalDraw: 12,
+      challengeable: false
+    });
+    expect(() => resolveChallenge(state, "p3", true)).toThrow("There is no Wild Draw Four");
+  });
+
   it("pauses auto turns when fewer than two active players are available and resumes when one returns", () => {
     const state = controlledGame3();
     state.turnDeadline = Date.now() + 30_000;
