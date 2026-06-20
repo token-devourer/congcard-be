@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Card } from "@congcard/shared";
 import { standardMode } from "../src/engine/modes/standard.js";
+import { applyFlipSide, flipMode } from "../src/engine/modes/flip.js";
 import {
   addPlayer,
   callOne,
@@ -14,6 +15,7 @@ import {
   resolveAutomatedTurns,
   resolveChallenge,
   resolvePendingBatchPlay,
+  resolvePendingFlip,
   resolvePendingOneCall,
   resolveRoundDeal,
   setPlayerAway,
@@ -24,6 +26,122 @@ import {
   updateSettings,
   type GameStateInternal
 } from "../src/engine/game.js";
+
+function flipCard(deck: Card[], color: Card["color"], value: Card["value"]): Card {
+  const index = deck.findIndex((item) => item.color === color && item.value === value);
+  if (index < 0) throw new Error(`Missing Flip card ${color} ${value}`);
+  return deck.splice(index, 1)[0]!;
+}
+
+function controlledFlipGame(): GameStateInternal {
+  const state = createGame("FLIP42", { modeId: "flip", turnTimeoutSec: 30 });
+  addPlayer(state, "p1", "Ava", "sun");
+  addPlayer(state, "p2", "Ben", "moon");
+  addPlayer(state, "p3", "Cy", "star");
+  const deck = flipMode.buildDeck(3);
+  state.phase = "playing";
+  state.flipSide = "light";
+  state.activeColor = "red";
+  state.discardPile = [flipCard(deck, "red", 5)];
+  state.drawPile = deck;
+  state.currentSeat = 0;
+  state.direction = 1;
+  state.players.forEach((player) => { player.hand = []; });
+  return state;
+}
+
+describe("flip mode", () => {
+  it("builds 116 paired cards and exposes only the active face", () => {
+    const deck = flipMode.buildDeck(4);
+    expect(deck).toHaveLength(116);
+    expect(deck.filter((item) => item.color === "red" && item.value === "flip")).toHaveLength(2);
+    const state = controlledFlipGame();
+    state.players[0]!.hand = [flipCard(state.drawPile, "red", "flip")];
+    expect(snapshotFor(state, "p1").self?.hand[0]).toEqual(expect.objectContaining({ color: "red", value: "flip" }));
+    expect(snapshotFor(state, "p1").self?.hand[0]).not.toHaveProperty("flipFaces");
+  });
+
+  it("synchronously flips every card zone and advances after resolution", () => {
+    const state = controlledFlipGame();
+    state.players[0]!.hand = [flipCard(state.drawPile, "red", "flip"), flipCard(state.drawPile, "blue", 2)];
+    state.players[1]!.hand = [flipCard(state.drawPile, "yellow", "draw2")];
+    playCard(state, "p1", state.players[0]!.hand[0]!.id);
+    expect(state.pendingFlip?.toSide).toBe("dark");
+    state.pendingFlip!.resolvesAt = 0;
+    expect(resolvePendingFlip(state)).toBe(true);
+    expect(state.flipSide).toBe("dark");
+    expect(state.players[0]!.hand[0]).toMatchObject({ color: "pink", value: 2 });
+    expect(state.players[1]!.hand[0]).toMatchObject({ color: "cyan", value: "draw5" });
+    expect(snapshotFor(state).currentPlayerId).toBe("p2");
+  });
+
+  it("toggles once per Flip card in a batch", () => {
+    const state = controlledFlipGame();
+    state.settings.batchEnabled = true;
+    state.players[0]!.hand = [
+      flipCard(state.drawPile, "red", "flip"),
+      flipCard(state.drawPile, "yellow", "flip"),
+      flipCard(state.drawPile, "green", 1)
+    ];
+    playBatch(state, "p1", state.players[0]!.hand.slice(0, 2).map((item) => item.id));
+    state.pendingBatchPlay!.resolvesAt = 0;
+    resolvePendingBatchPlay(state);
+    expect(state.pendingFlip?.transitionTimes).toHaveLength(2);
+    expect(state.pendingFlip?.toSide).toBe("light");
+    state.pendingFlip!.resolvesAt = 0;
+    resolvePendingFlip(state);
+    expect(state.flipSide).toBe("light");
+  });
+
+  it("uses challengeable light Wild +3 and unchallengeable dark Wild Color", () => {
+    const light = controlledFlipGame();
+    light.settings.challengeEnabled = true;
+    light.players[0]!.hand = [flipCard(light.drawPile, null, "wild3"), flipCard(light.drawPile, "red", 9)];
+    playCard(light, "p1", light.players[0]!.hand[0]!.id, "blue");
+    expect(light.pendingChallenge).toMatchObject({ kind: "wild3", drawCount: 3, guilty: true });
+
+    const dark = controlledFlipGame();
+    dark.flipSide = "dark";
+    for (const card of [...dark.drawPile, ...dark.discardPile]) applyFlipSide(card, "dark");
+    dark.activeColor = "orange";
+    dark.players[0]!.hand = [flipCard(dark.drawPile, null, "wildColor"), flipCard(dark.drawPile, "orange", 1)];
+    dark.drawPile = [
+      flipCard(dark.drawPile, "pink", 1),
+      flipCard(dark.drawPile, "cyan", 2),
+      flipCard(dark.drawPile, "purple", 3)
+    ];
+    playCard(dark, "p1", dark.players[0]!.hand[0]!.id, "cyan");
+    expect(dark.pendingChallenge).toBeUndefined();
+    expect(dark.players[1]!.hand).toHaveLength(2);
+    expect(snapshotFor(dark).currentPlayerId).toBe("p3");
+  });
+
+  it("accumulates one dark target color across Batch and Stacking", () => {
+    const state = controlledFlipGame();
+    state.flipSide = "dark";
+    state.settings.batchEnabled = true;
+    state.settings.stackingEnabled = true;
+    state.settings.callEnabled = false;
+    for (const card of [...state.drawPile, ...state.discardPile]) applyFlipSide(card, "dark");
+    state.activeColor = "orange";
+    state.players[0]!.hand = [
+      flipCard(state.drawPile, null, "wildColor"),
+      flipCard(state.drawPile, null, "wildColor"),
+      flipCard(state.drawPile, "orange", 1)
+    ];
+    state.players[1]!.hand = [flipCard(state.drawPile, null, "wildColor"), flipCard(state.drawPile, "cyan", 1)];
+    state.players[2]!.hand = [flipCard(state.drawPile, null, "wildColor"), flipCard(state.drawPile, "purple", 1)];
+
+    playBatch(state, "p1", state.players[0]!.hand.slice(0, 2).map((item) => item.id), "cyan");
+    state.pendingBatchPlay!.resolvesAt = 0;
+    resolvePendingBatchPlay(state);
+    expect(state.pendingStack).toMatchObject({ kind: "wildColor", totalDraw: 2, targetColor: "cyan", targetPlayerId: "p2" });
+
+    playCard(state, "p2", state.players[1]!.hand[0]!.id, "purple");
+    expect(state.pendingChallenge).toBeUndefined();
+    expect(state.pendingStack).toMatchObject({ kind: "wildColor", totalDraw: 3, targetColor: "purple", targetPlayerId: "p3" });
+  });
+});
 
 function card(id: string, color: Card["color"], value: Card["value"]): Card {
   return { id, color, value, deckIndex: 0 };

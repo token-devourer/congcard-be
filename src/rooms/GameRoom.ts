@@ -33,6 +33,7 @@ import {
   resolveChallenge,
   resolveAutomatedTurns,
   resolvePendingBatchPlay,
+  resolvePendingFlip,
   resolveRoundDeal,
   resolvePendingOneCall,
   sendEmote,
@@ -77,6 +78,7 @@ export class GameRoom extends Room {
       try {
         const dealChanged = resolveRoundDeal(this.game);
         const batchResolved = resolvePendingBatchPlay(this.game);
+        const flipResolved = resolvePendingFlip(this.game);
         const oneCallResolved = resolvePendingOneCall(this.game);
         const windowClosed = expireOneWindow(this.game);
         const autoPlayedBeforeTimeout = resolveAutomatedTurns(this.game);
@@ -85,6 +87,7 @@ export class GameRoom extends Room {
         if (
           dealChanged ||
           batchResolved ||
+          flipResolved ||
           oneCallResolved ||
           windowClosed ||
           autoPlayedBeforeTimeout ||
