@@ -47,14 +47,14 @@ const BATCH_MAX_CARD_INTERVAL_MS = 180;
 const BATCH_MIN_CARD_INTERVAL_MS = 40;
 const BATCH_FLIGHT_DURATION_MS = 800;
 const DEAL_INACTIVITY_MS = 30_000;
-const DEAL_SYNC_MIN_LEAD_MS = 300;
-const DEAL_SYNC_EXTRA_MS = 150;
-const DEAL_FLIGHT_DURATION_MS = 800;
+const DEAL_SYNC_MIN_LEAD_MS = 200;
+const DEAL_SYNC_EXTRA_MS = 100;
+const DEAL_FLIGHT_DURATION_MS = 360;
 const SHUFFLE_DURATION_MS = 1_800;
 const OPENING_DURATION_MS = 900;
-const AUTO_DEAL_MIN_DURATION_MS = 6_000;
-const AUTO_DEAL_MAX_DURATION_MS = 10_000;
-const AUTO_DEAL_BASE_INTERVAL_MS = 180;
+const AUTO_DEAL_MIN_DURATION_MS = 3_000;
+const AUTO_DEAL_MAX_DURATION_MS = 6_000;
+const AUTO_DEAL_BASE_INTERVAL_MS = 100;
 const FLIP_SYNC_MIN_LEAD_MS = 350;
 const FLIP_SYNC_EXTRA_MS = 180;
 const FLIP_STEP_MS = 650;
@@ -2560,7 +2560,7 @@ function scheduleDealSequence(state: GameStateInternal, targetPlayerIds: string[
     Math.max(AUTO_DEAL_MIN_DURATION_MS, targetPlayerIds.length * AUTO_DEAL_BASE_INTERVAL_MS)
   );
   const cardIntervalMs = adaptive && targetPlayerIds.length > 1
-    ? Math.max(80, Math.round(targetDuration / targetPlayerIds.length))
+    ? Math.max(50, Math.round(targetDuration / targetPlayerIds.length))
     : 0;
   const resolvesAt = startsAt + (targetPlayerIds.length - 1) * cardIntervalMs + DEAL_FLIGHT_DURATION_MS;
   const event: RoundDealEvent = {

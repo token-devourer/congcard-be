@@ -95,6 +95,7 @@ describe("synchronized round dealing", () => {
 
     beginManualDeal(state, "host");
     dealRoundCard(state, "host", "p3");
+    expect(state.roundDeal?.event?.resolvesAt! - state.roundDeal?.event?.startsAt!).toBeLessThanOrEqual(400);
     resolveCurrentEvent(state);
     dealRoundCard(state, "host", "host");
     resolveCurrentEvent(state);
@@ -137,8 +138,8 @@ describe("synchronized round dealing", () => {
     expect(event?.kind).toBe("deal");
     if (event?.kind === "deal") {
       const sequenceSpan = (event.targetPlayerIds.length - 1) * event.cardIntervalMs;
-      expect(sequenceSpan).toBeGreaterThanOrEqual(5_000);
-      expect(sequenceSpan).toBeLessThanOrEqual(10_000);
+      expect(sequenceSpan).toBeGreaterThanOrEqual(2_500);
+      expect(sequenceSpan).toBeLessThanOrEqual(6_000);
     }
     finishAutomaticDeal(state);
 
