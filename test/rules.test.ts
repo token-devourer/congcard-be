@@ -885,7 +885,7 @@ describe("standard mode", () => {
     expect(snapshotFor(state).currentPlayerId).toBe("p2");
   });
 
-  it("finalizes a Last Stand Wild Draw Four finisher only after challenge resolution", () => {
+  it("skips an impossible challenge when a legal Wild Draw Four is the final card", () => {
     const state = controlledGame3();
     state.settings.scoreTarget = "lastStand";
     state.players[0]!.hand = [card("p1-wild4", null, "wild4")];
@@ -894,15 +894,42 @@ describe("standard mode", () => {
 
     playCard(state, "p1", "p1-wild4", "blue");
 
-    expect(state.pendingChallenge).toBeDefined();
+    expect(state.pendingChallenge).toBeUndefined();
+    expect(state.pendingDraw).toBeDefined();
+    expect(state.pauseReason).toBeUndefined();
     expect(state.players[0]!.finishedRank).toBeUndefined();
 
-    resolveChallenge(state, "p2", true);
     settlePendingDraw(state);
 
     expect(state.pendingChallenge).toBeUndefined();
     expect(state.players[0]!.finishedRank).toBe(1);
     expect(state.phase).toBe("playing");
+  });
+
+  it("finishes a two-player Last Stand round after a final Wild +3 penalty without pausing", () => {
+    const state = controlledFlipGame();
+    state.players = state.players.slice(0, 2);
+    state.settings.scoreTarget = "lastStand";
+    state.settings.stackingEnabled = true;
+    state.settings.challengeEnabled = true;
+    state.players[0]!.hand = [flipCard(state.drawPile, null, "wild3")];
+    state.players[1]!.hand = [flipCard(state.drawPile, "red", 7)];
+
+    playCard(state, "p1", state.players[0]!.hand[0]!.id, "yellow");
+
+    expect(state.pendingChallenge).toBeUndefined();
+    expect(state.pauseReason).toBeUndefined();
+    expect(state.pendingDraw).toBeDefined();
+    expect(state.players[0]!.finishedRank).toBe(1);
+
+    settlePendingDraw(state);
+
+    expect(state.phase).toBe("roundEnd");
+    expect(state.pauseReason).toBeUndefined();
+    expect(state.lastStandPlacements).toMatchObject([
+      { playerId: "p1", rank: 1 },
+      { playerId: "p2", rank: 2, isLoser: true }
+    ]);
   });
 
   it("lets a Last Stand stack continue after finishers leave active rotation", () => {

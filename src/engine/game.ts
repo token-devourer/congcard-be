@@ -1591,13 +1591,14 @@ function applyBatchCards(
     }
 
     const guilty = handBefore.some((item) => !cards.some((batchCard) => batchCard.id === item.id) && item.color === activeColorBefore);
+    const certainlyLegalFinalPlay = player.hand.length === 0 && !guilty;
     if (state.settings.stackingEnabled) {
       startStack(
         state,
         player,
         value,
         totalDraw,
-        state.settings.challengeEnabled
+        state.settings.challengeEnabled && !certainlyLegalFinalPlay
           ? { declaredColor: state.activeColor ?? "red", guilty }
           : undefined
       );
@@ -1605,7 +1606,7 @@ function applyBatchCards(
     }
 
     const target = findPlayerBySeat(state, seatAfter(state, player.seat));
-    if (!state.settings.challengeEnabled) {
+    if (!state.settings.challengeEnabled || certainlyLegalFinalPlay) {
       state.currentSeat = seatAfter(state, target.seat);
       pushLog(state, "challenge", `${target.nickname} took ${totalDraw} cards.`);
       queueFixedDraw(state, target, totalDraw, "penalty", { type: "setDeadline", offenderId: player.id });
@@ -1730,17 +1731,19 @@ function applyPlayedCard(
 
   if (card.value === "wild4" || card.value === "wild3") {
     const amount = card.value === "wild4" ? 4 : 3;
+    const previousColor = options.prevColor;
+    const guilty = previousColor ? handBefore.some((item) => item.color === previousColor) : false;
+    const certainlyLegalFinalPlay = player.hand.length === 0 && !guilty;
     if (state.settings.stackingEnabled) {
-      const previousColor = options.prevColor;
       startStack(
         state,
         player,
         card.value,
         amount,
-        state.settings.challengeEnabled && !options.resetStackFromJumpIn
+        state.settings.challengeEnabled && !options.resetStackFromJumpIn && !certainlyLegalFinalPlay
           ? {
               declaredColor: state.activeColor ?? "red",
-              guilty: previousColor ? handBefore.some((item) => item.color === previousColor) : false
+              guilty
             }
           : undefined
       );
@@ -1748,8 +1751,7 @@ function applyPlayedCard(
     }
 
     const target = findPlayerBySeat(state, seatAfter(state, player.seat));
-    const previousColor = options.prevColor;
-    if (!state.settings.challengeEnabled) {
+    if (!state.settings.challengeEnabled || certainlyLegalFinalPlay) {
       state.currentSeat = seatAfter(state, target.seat);
       pushLog(state, "challenge", `${target.nickname} took ${amount} cards.`);
       queueFixedDraw(state, target, amount, "penalty", { type: "setDeadline", offenderId: player.id });
@@ -1761,7 +1763,7 @@ function applyPlayedCard(
       offenderId: player.id,
       challengerId: target.id,
       declaredColor: state.activeColor ?? "red",
-      guilty: previousColor ? handBefore.some((item) => item.color === previousColor) : false,
+      guilty,
       drawCount: amount
     };
     state.currentSeat = target.seat;
@@ -2052,6 +2054,7 @@ function maybeCompleteLastStandRound(state: GameStateInternal): boolean {
   delete state.pendingStack;
   delete state.oneWindow;
   delete state.pendingOneCall;
+  delete state.pauseReason;
   return true;
 }
 
@@ -3151,6 +3154,16 @@ function setTurnDeadline(state: GameStateInternal): void {
 
 function syncPauseState(state: GameStateInternal): { paused: boolean; changed: boolean } {
   if (state.phase !== "playing") {
+    const changed = Boolean(state.pauseReason);
+    delete state.pauseReason;
+    return { paused: false, changed };
+  }
+
+  const resolvingLastStandFinish =
+    isLastStand(state) &&
+    activePlayers(state).length <= 1 &&
+    Boolean(state.pendingChallenge || state.pendingStack || state.pendingDraw);
+  if (resolvingLastStandFinish) {
     const changed = Boolean(state.pauseReason);
     delete state.pauseReason;
     return { paused: false, changed };
