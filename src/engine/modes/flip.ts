@@ -39,68 +39,100 @@ function pairedCard(deckIndex: number, light: FlipFace, dark: FlipFace): FlipCar
 }
 
 export function buildFlipDeckBox(deckIndex: number): Card[] {
-  const cards: FlipCardInternal[] = [];
-  // Randomize dark-color mapping and action-value pairing so pairs differ per deck box.
-  // Controlled by env var `RANDOMIZE_FLIP_PAIRS=1`. Default behavior preserves
-  // the original deterministic mapping (keeps tests stable).
-  let darkForLight: Record<string, string>;
-  let actionPairs: Array<[CardValue, CardValue]>;
+  const randomizePairs = process.env.NODE_ENV === "production" || config.nodeEnv === "production" || config.randomizeFlipPairs;
 
-  // Enable randomization in production by default, or when enabled in config.
-  // Check `process.env.NODE_ENV` as a fallback so starting the process with
-  // NODE_ENV=production always triggers randomization even if config parsing
-  // happens earlier or is overwritten.
-  if (process.env.NODE_ENV === "production" || config.nodeEnv === "production" || config.randomizeFlipPairs) {
-    const shuffledDarkColors = shuffleCards([...DARK_COLORS]);
-    darkForLight = {};
-    for (let i = 0; i < LIGHT_COLORS.length; i += 1) {
-      darkForLight[LIGHT_COLORS[i] as string] = shuffledDarkColors[i % shuffledDarkColors.length]!;
+  if (!randomizePairs) {
+    const cards: FlipCardInternal[] = [];
+    for (const lightColor of LIGHT_COLORS) {
+      const darkColor = DEFAULT_DARK_FOR_LIGHT[lightColor];
+      cards.push(pairedCard(deckIndex, { color: lightColor, value: 0 }, { color: darkColor, value: 0 }));
+      for (let value = 1; value <= 9; value += 1) {
+        for (let copy = 0; copy < 2; copy += 1) {
+          cards.push(
+            pairedCard(
+              deckIndex,
+              { color: lightColor, value: value as CardValue },
+              { color: darkColor, value: value as CardValue }
+            )
+          );
+        }
+      }
+
+      const pairs: Array<[CardValue, CardValue]> = [
+        ["skip", "skip"],
+        ["reverse", "reverse"],
+        ["draw2", "draw5"],
+        ["flip", "flip"]
+      ];
+      for (const [lightValue, darkValue] of pairs) {
+        for (let copy = 0; copy < 2; copy += 1) {
+          cards.push(
+            pairedCard(
+              deckIndex,
+              { color: lightColor, value: lightValue },
+              { color: darkColor, value: darkValue }
+            )
+          );
+        }
+      }
     }
 
-    const lightActions: CardValue[] = ["skip", "reverse", "draw2", "flip"];
-    const darkActions: CardValue[] = ["skip", "reverse", "draw5", "flip"];
-    const shuffledDarkActions = shuffleCards([...darkActions]) as CardValue[];
-    actionPairs = lightActions.map((lv, i) => [lv, shuffledDarkActions[i]!]);
-  } else {
-    darkForLight = { ...DEFAULT_DARK_FOR_LIGHT };
-    actionPairs = [
-      ["skip", "skip"],
-      ["reverse", "reverse"],
-      ["draw2", "draw5"],
-      ["flip", "flip"]
-    ];
+    for (let copy = 0; copy < 4; copy += 1) {
+      cards.push(pairedCard(deckIndex, { color: null, value: "wild" }, { color: null, value: "wild" }));
+      cards.push(pairedCard(deckIndex, { color: null, value: "wild3" }, { color: null, value: "wildColor" }));
+    }
+
+    return cards;
   }
 
+  const lightFaces: FlipFace[] = [];
   for (const lightColor of LIGHT_COLORS) {
-    const darkColor = darkForLight[lightColor as string] as (typeof DARK_COLORS)[number];
-    cards.push(pairedCard(deckIndex, { color: lightColor, value: 0 }, { color: darkColor, value: 0 }));
+    lightFaces.push({ color: lightColor, value: 0 });
     for (let value = 1; value <= 9; value += 1) {
-      for (let copy = 0; copy < 2; copy += 1) {
-        cards.push(
-          pairedCard(
-            deckIndex,
-            { color: lightColor, value: value as CardValue },
-            { color: darkColor, value: value as CardValue }
-          )
-        );
-      }
+      lightFaces.push({ color: lightColor, value: value as CardValue });
+      lightFaces.push({ color: lightColor, value: value as CardValue });
     }
-    for (const [lightValue, darkValue] of actionPairs) {
-      for (let copy = 0; copy < 2; copy += 1) {
-        cards.push(
-          pairedCard(
-            deckIndex,
-            { color: lightColor, value: lightValue },
-            { color: darkColor, value: darkValue }
-          )
-        );
-      }
+    for (const action of ["skip", "reverse", "draw2", "flip"] as const) {
+      lightFaces.push({ color: lightColor, value: action });
+      lightFaces.push({ color: lightColor, value: action });
     }
   }
-
   for (let copy = 0; copy < 4; copy += 1) {
-    cards.push(pairedCard(deckIndex, { color: null, value: "wild" }, { color: null, value: "wild" }));
-    cards.push(pairedCard(deckIndex, { color: null, value: "wild3" }, { color: null, value: "wildColor" }));
+    lightFaces.push({ color: null, value: "wild" });
+    lightFaces.push({ color: null, value: "wild3" });
+  }
+
+  const darkFaces: FlipFace[] = [];
+  for (const darkColor of DARK_COLORS) {
+    darkFaces.push({ color: darkColor, value: 0 });
+    for (let value = 1; value <= 9; value += 1) {
+      darkFaces.push({ color: darkColor, value: value as CardValue });
+      darkFaces.push({ color: darkColor, value: value as CardValue });
+    }
+    for (const action of ["skip", "reverse", "draw5", "flip"] as const) {
+      darkFaces.push({ color: darkColor, value: action });
+      darkFaces.push({ color: darkColor, value: action });
+    }
+  }
+  for (let copy = 0; copy < 4; copy += 1) {
+    darkFaces.push({ color: null, value: "wild" });
+    darkFaces.push({ color: null, value: "wildColor" });
+  }
+
+  const shuffledDarkFaces = shuffleCards(darkFaces);
+  const darkWildFaces = shuffledDarkFaces.filter((face) => face.value === "wild" || face.value === "wildColor");
+  const darkNonWildFaces = shuffledDarkFaces.filter((face) => face.value !== "wild" && face.value !== "wildColor");
+
+  const lightFlipCount = lightFaces.reduce((count, face) => (face.value === "flip" ? count + 1 : count), 0);
+  const reservedForFlip = darkNonWildFaces.slice(0, lightFlipCount);
+  const remainderForOthers = shuffleCards([...darkNonWildFaces.slice(lightFlipCount), ...darkWildFaces]);
+
+  const cards: FlipCardInternal[] = [];
+  let flipIndex = 0;
+  let otherIndex = 0;
+  for (const light of lightFaces) {
+    const dark = light.value === "flip" ? reservedForFlip[flipIndex++] : remainderForOthers[otherIndex++];
+    cards.push(pairedCard(deckIndex, light, dark!));
   }
 
   return cards;
