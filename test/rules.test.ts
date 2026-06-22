@@ -398,7 +398,29 @@ describe("standard mode", () => {
     settlePendingDraw(state);
 
     expect(state.players[0]!.hand).toHaveLength(5);
+    expect(state.players[0]!.calledOne).toBe(false);
+    expect(state.oneWindow).toBeUndefined();
     expect(snapshotFor(state).currentPlayerId).toBe("p2");
+  });
+
+  it("preserves a successful One call after an innocent Wild Draw Four challenge", () => {
+    const state = controlledGame();
+    state.players[0]!.hand = [card("p1-wild4", null, "wild4"), card("p1-green-2", "green", 2)];
+    state.players[1]!.hand = [card("p2-yellow-7", "yellow", 7)];
+
+    playCard(state, "p1", "p1-wild4", "green");
+    state.oneWindow!.opensAt = Date.now() - 1;
+    state.oneWindow!.deadline = Date.now() + 1000;
+    callOne(state, "p1");
+    state.pendingOneCall!.resolvesAt = Date.now() - 1;
+    expect(resolvePendingOneCall(state)).toBe(true);
+
+    resolveChallenge(state, "p2", true);
+    settlePendingDraw(state);
+
+    expect(state.players[0]!.hand).toHaveLength(1);
+    expect(state.players[0]!.calledOne).toBe(true);
+    expect(state.oneWindow).toBeUndefined();
   });
 
   it("penalizes missed One calls", () => {
@@ -1500,7 +1522,27 @@ describe("standard mode", () => {
     expect(state.pendingChallenge).toBeUndefined();
     expect(state.players[2]!.hand).toHaveLength(11);
     expect(snapshotFor(state).currentPlayerId).toBe("p1");
-    expect(state.oneWindow?.playerId).toBe("p2");
+    expect(state.players[1]!.calledOne).toBe(true);
+    expect(state.oneWindow).toBeUndefined();
+  });
+
+  it("does not reopen an expired One window after an innocent Wild Draw Four challenge", () => {
+    const state = controlledGame();
+    state.players[0]!.hand = [card("p1-wild4", null, "wild4"), card("p1-green-2", "green", 2)];
+    state.players[1]!.hand = [card("p2-yellow-7", "yellow", 7)];
+
+    playCard(state, "p1", "p1-wild4", "green");
+    expect(state.pendingChallenge).toMatchObject({ offenderId: "p1", challengerId: "p2", guilty: false });
+    expect(state.oneWindow?.playerId).toBe("p1");
+
+    state.oneWindow!.deadline = Date.now() - 1;
+    expect(expireOneWindow(state)).toBe(true);
+    resolveChallenge(state, "p2", true);
+    settlePendingDraw(state);
+
+    expect(state.players[0]!.hand).toHaveLength(1);
+    expect(state.players[0]!.calledOne).toBe(false);
+    expect(state.oneWindow).toBeUndefined();
   });
 
   it("judges a Wild Draw Four played over a declared color by that color, not a buried card", () => {

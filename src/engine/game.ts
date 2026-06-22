@@ -89,7 +89,7 @@ interface DealQueueInternal {
 
 type DrawContinuation =
   | { type: "normal"; automated: boolean }
-  | { type: "setDeadline"; offenderId?: string }
+  | { type: "setDeadline"; offenderId?: string; preserveOneState?: boolean }
   | { type: "finishWinner"; winnerId: string };
 
 interface PendingDrawInternal {
@@ -1248,16 +1248,28 @@ export function resolveChallenge(state: GameStateInternal, playerId: string, acc
     const totalDraw = challengeableStack?.totalDraw ?? pending.drawCount ?? 4;
     state.currentSeat = seatAfter(state, challenger.seat);
     pushLog(state, "challenge", totalDraw === 4 ? `${challenger.nickname} took four cards.` : `${challenger.nickname} took ${totalDraw} cards.`);
-    queueFixedDraw(state, challenger, totalDraw, "challenge", { type: "setDeadline", offenderId: offender.id });
+    queueFixedDraw(state, challenger, totalDraw, "challenge", {
+      type: "setDeadline",
+      offenderId: offender.id,
+      preserveOneState: true
+    });
   } else if (pending.guilty) {
     state.currentSeat = challenger.seat;
     pushLog(state, "challenge", `${challenger.nickname} won the challenge.`);
-    queueFixedDraw(state, offender, pending.drawCount ?? 4, "challenge", { type: "setDeadline", offenderId: offender.id });
+    queueFixedDraw(state, offender, pending.drawCount ?? 4, "challenge", {
+      type: "setDeadline",
+      offenderId: offender.id,
+      preserveOneState: true
+    });
   } else {
     const drawCount = (pending.drawCount ?? 4) + 2;
     state.currentSeat = seatAfter(state, challenger.seat);
     pushLog(state, "challenge", `${challenger.nickname} lost the challenge and drew ${drawCount} cards.`);
-    queueFixedDraw(state, challenger, drawCount, "challenge", { type: "setDeadline", offenderId: offender.id });
+    queueFixedDraw(state, challenger, drawCount, "challenge", {
+      type: "setDeadline",
+      offenderId: offender.id,
+      preserveOneState: true
+    });
   }
 }
 
@@ -2546,7 +2558,14 @@ function completeDrawContinuation(state: GameStateInternal, continuation: DrawCo
       finishPlayerOrCompleteRound(state, offender.id);
       return;
     }
-    updateOneWindowAfterPlay(state, offender);
+    if (continuation.preserveOneState) {
+      if (offender.hand.length !== 1) {
+        offender.calledOne = false;
+        closeOneWindowForPlayer(state, offender.id);
+      }
+    } else {
+      updateOneWindowAfterPlay(state, offender);
+    }
   }
   if (maybeCompleteLastStandRound(state)) return;
   if (state.phase === "playing") setTurnDeadline(state);
