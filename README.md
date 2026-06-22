@@ -37,6 +37,27 @@ RECONNECT_GRACE_SEC=60
 LOG_LEVEL=info
 ```
 
+### Flip mode randomization
+
+The server supports randomizing the mapping between light/dark flip faces and the action-value pairs used by the `flip` game mode. This is useful for production deployments where decks should vary between runs.
+
+- Config option: `RANDOMIZE_FLIP_PAIRS` (env) — accepts `0` or `1`. Default is `0`.
+- Runtime config: exposed via `config.randomizeFlipPairs` in the application.
+- Behavior: randomization is automatically enabled when `NODE_ENV=production`, or when `RANDOMIZE_FLIP_PAIRS=1`.
+
+To force randomization locally for testing:
+
+```bash
+RANDOMIZE_FLIP_PAIRS=1 npm run dev
+```
+
+On Windows CMD:
+
+```bash
+set "RANDOMIZE_FLIP_PAIRS=1" && npm run dev
+```
+
+
 For Railway, replace `CORS_ORIGINS` with the Vercel frontend URL.
 
 ## Checks

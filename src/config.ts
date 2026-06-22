@@ -9,6 +9,7 @@ const envSchema = z.object({
   TURN_TIMEOUT_DEFAULT: z.coerce.number().int().min(10).max(120).default(30),
   RECONNECT_GRACE_SEC: z.coerce.number().int().min(0).max(600).default(60),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info")
+  ,RANDOMIZE_FLIP_PAIRS: z.enum(["0", "1"]).default("0")
 });
 
 export interface AppConfig {
@@ -19,6 +20,7 @@ export interface AppConfig {
   turnTimeoutDefault: number;
   reconnectGraceSec: number;
   logLevel: "fatal" | "error" | "warn" | "info" | "debug" | "trace" | "silent";
+  randomizeFlipPairs: boolean;
 }
 
 export function parseConfig(environment: NodeJS.ProcessEnv): AppConfig {
@@ -39,6 +41,7 @@ export function parseConfig(environment: NodeJS.ProcessEnv): AppConfig {
     turnTimeoutDefault: parsed.TURN_TIMEOUT_DEFAULT,
     reconnectGraceSec: parsed.RECONNECT_GRACE_SEC,
     logLevel: parsed.LOG_LEVEL
+    ,randomizeFlipPairs: parsed.RANDOMIZE_FLIP_PAIRS === "1"
   };
 }
 

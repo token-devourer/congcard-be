@@ -10,7 +10,8 @@ describe("server configuration", () => {
       maxRooms: 100,
       turnTimeoutDefault: 30,
       reconnectGraceSec: 60,
-      logLevel: "info"
+      logLevel: "info",
+      randomizeFlipPairs: false
     });
   });
 

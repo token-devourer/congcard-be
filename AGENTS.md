@@ -94,6 +94,17 @@ Run `npm run build` too when the change touches TypeScript configuration, packag
 
 ## PR checklist
 
+## Agent Notes: Flip-mode randomization
+
+- Purpose: the `flip` game mode can randomize the mapping between light/dark faces and action-value pairs to vary decks between runs. This behavior reduces predictability in production decks.
+- Config: controlled via the env var `RANDOMIZE_FLIP_PAIRS` (values `0` or `1`) and exposed in code as `config.randomizeFlipPairs` in `src/config.ts`.
+- Behavior: randomization is enabled automatically when `config.nodeEnv === "production"` or when `config.randomizeFlipPairs === true`. The deck-building logic lives in `src/engine/modes/flip.ts`.
+- Agent responsibilities:
+	- Assume deterministic pairings in local development and tests unless randomization is explicitly enabled.
+	- When changing flip-pairing logic, update tests to pin randomization off or make tests resilient to randomized mappings.
+	- Document any protocol or snapshot changes caused by randomized pairings in PR descriptions and `CHANGELOG.md`.
+
+
 - Summarize the behavioral change and affected files.
 - List validation commands and their results.
 - Mention any required frontend companion change.

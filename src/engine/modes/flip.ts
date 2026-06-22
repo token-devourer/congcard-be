@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import type { Card, CardValue, Color, FlipSide, GameMode, OpponentCardFace, TurnContext, VisibleCardFace } from "@congcard/shared";
 import { DARK_COLORS, LIGHT_COLORS } from "@congcard/shared";
 import { shuffleCards } from "./standard.js";
+import { config } from "../../config.js";
 
 interface FlipFace {
   color: Color | null;
@@ -45,7 +46,8 @@ export function buildFlipDeckBox(deckIndex: number): Card[] {
   let darkForLight: Record<string, string>;
   let actionPairs: Array<[CardValue, CardValue]>;
 
-  if (process.env.RANDOMIZE_FLIP_PAIRS === "1") {
+  // Enable randomization in production by default, or when enabled in config.
+  if (config.nodeEnv === "production" || config.randomizeFlipPairs) {
     const shuffledDarkColors = shuffleCards([...DARK_COLORS]);
     darkForLight = {};
     for (let i = 0; i < LIGHT_COLORS.length; i += 1) {
