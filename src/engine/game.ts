@@ -222,6 +222,10 @@ export function addPlayer(
     return "player";
   }
 
+  if (state.phase === "lobby") {
+    cleanupDisconnectedParticipants(state);
+  }
+
   if (state.phase !== "lobby") {
     const role = state.phase === "gameEnd" || !state.settings.allowMidGameJoin ? "spectator" : "waiting";
     state.viewers.push({
@@ -279,7 +283,6 @@ export function setPlayerConnected(state: GameStateInternal, id: string, connect
     player.missedDisconnectedTurns = 0;
     syncAbsentAutomation(state, player);
     pushLog(state, "room", `${player.nickname} disconnected.`);
-    assignHost(state);
     syncPauseState(state);
     syncRoundDealer(state);
   } else {
@@ -302,7 +305,6 @@ export function setPlayerAway(state: GameStateInternal, id: string, away: boolea
   player.missedDisconnectedTurns = 0;
   syncAbsentAutomation(state, player);
   pushLog(state, "room", away ? `${player.nickname} is away.` : `${player.nickname} returned to the table.`);
-  assignHost(state);
   syncPauseState(state);
   syncRoundDealer(state);
 }
@@ -461,6 +463,8 @@ export function startRound(state: GameStateInternal): void {
 
   const mode = getMode(state.settings);
   const previousPlacements = state.lastStandPlacements ? [...state.lastStandPlacements] : undefined;
+
+  cleanupDisconnectedParticipants(state);
 
   if (state.phase === "roundEnd") {
     promoteWaitingPlayers(state);
@@ -2922,12 +2926,27 @@ function connectPlayer(state: GameStateInternal, player: PlayerState): void {
   player.away = false;
   player.missedDisconnectedTurns = 0;
   player.autoPlay = false;
-  assignHost(state);
   syncPauseState(state);
   syncRoundDealer(state);
   if (!wasConnected) {
     pushLog(state, "room", `${player.nickname} reconnected.`);
   }
+}
+
+function cleanupDisconnectedParticipants(state: GameStateInternal): void {
+  const removedPlayerIds = new Set(
+    state.players.filter((player) => !player.connected && !player.away).map((player) => player.id)
+  );
+  const removedViewerIds = new Set(state.viewers.filter((viewer) => !viewer.connected).map((viewer) => viewer.id));
+
+  if (removedPlayerIds.size === 0 && removedViewerIds.size === 0) {
+    return;
+  }
+
+  state.players = state.players.filter((player) => !removedPlayerIds.has(player.id));
+  state.viewers = state.viewers.filter((viewer) => !removedViewerIds.has(viewer.id));
+  assignHost(state);
+  pushLog(state, "room", "Disconnected participants were removed from the room.");
 }
 
 function promoteWaitingPlayers(state: GameStateInternal): void {
@@ -3256,7 +3275,7 @@ function currentPlayer(state: GameStateInternal): PlayerState {
 }
 
 function assignHost(state: GameStateInternal): void {
-  if (state.players.some((player) => player.isHost && player.connected && !player.away)) {
+  if (state.players.some((player) => player.isHost)) {
     return;
   }
 

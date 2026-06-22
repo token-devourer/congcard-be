@@ -43,6 +43,24 @@ describe("room lifecycle", () => {
     expect(state.players.find((player) => player.id === "guest")?.isHost).toBe(true);
   });
 
+  it("keeps the host stable while disconnected and only reassigns after stale cleanup", () => {
+    const state = createGame("ROOM42");
+    addPlayer(state, "host", "Host", "sun");
+    addPlayer(state, "guest", "Guest", "moon");
+    addPlayer(state, "third", "Third", "star");
+    setReady(state, "guest", true);
+    setReady(state, "third", true);
+
+    setPlayerConnected(state, "host", false);
+    expect(state.players.find((player) => player.id === "host")?.isHost).toBe(true);
+
+    startRound(state);
+    finishAutomaticDeal(state);
+
+    expect(state.players.some((player) => player.id === "host")).toBe(false);
+    expect(state.players.find((player) => player.isHost)?.id).toBe("guest");
+  });
+
   it("preserves independent room toggles across incremental updates", () => {
     const state = createGame("ROOM44");
     addPlayer(state, "host", "Host", "sun");
@@ -165,6 +183,24 @@ describe("room lifecycle", () => {
 
     expect(snapshotFor(state, "late").self?.role).toBe("player");
     expect(state.players.find((player) => player.id === "late")?.hand).toHaveLength(7);
+    expect(state.viewers).toHaveLength(0);
+  });
+
+  it("cleans up disconnected participants before starting the next round", () => {
+    const state = createGame("ROOM42", { allowMidGameJoin: true });
+    addPlayer(state, "p1", "Ava", "sun");
+    addPlayer(state, "p2", "Ben", "moon");
+    addPlayer(state, "p3", "Cy", "star");
+    state.phase = "roundEnd";
+    setPlayerConnected(state, "p2", false);
+
+    addPlayer(state, "late", "Late", "bolt");
+
+    startRound(state);
+    finishAutomaticDeal(state);
+
+    expect(state.players.some((player) => player.id === "p2")).toBe(false);
+    expect(state.players.some((player) => player.id === "late")).toBe(true);
     expect(state.viewers).toHaveLength(0);
   });
 
