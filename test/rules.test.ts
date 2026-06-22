@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Card } from "@congcard/shared";
+import { config } from "../src/config.js";
 import { standardMode } from "../src/engine/modes/standard.js";
 import { applyFlipSide, flipMode } from "../src/engine/modes/flip.js";
 import {
@@ -76,6 +77,25 @@ describe("flip mode", () => {
     state.players[0]!.hand = [flipCard(state.drawPile, "red", "flip")];
     expect(snapshotFor(state, "p1").self?.hand[0]).toEqual(expect.objectContaining({ color: "red", value: "flip" }));
     expect(snapshotFor(state, "p1").self?.hand[0]).not.toHaveProperty("flipFaces");
+  });
+
+  it("never pairs light flip cards with wild or flip on the dark face when randomized", () => {
+    const previous = config.randomizeFlipPairs;
+    config.randomizeFlipPairs = true;
+
+    try {
+      const deck = flipMode.buildDeck(1) as Array<Card & { flipFaces?: { dark?: Pick<Card, "color" | "value"> } }>;
+      const flipCards = deck.filter((card) => card.value === "flip");
+
+      expect(flipCards).toHaveLength(8);
+      expect(
+        flipCards.every(
+          (card) => card.flipFaces?.dark?.value !== "wild" && card.flipFaces?.dark?.value !== "wildColor" && card.flipFaces?.dark?.value !== "flip"
+        )
+      ).toBe(true);
+    } finally {
+      config.randomizeFlipPairs = previous;
+    }
   });
 
   it("uses opaque card identifiers and exposes only inactive opponent faces", () => {

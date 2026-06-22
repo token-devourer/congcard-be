@@ -122,10 +122,12 @@ export function buildFlipDeckBox(deckIndex: number): Card[] {
   const shuffledDarkFaces = shuffleCards(darkFaces);
   const darkWildFaces = shuffledDarkFaces.filter((face) => face.value === "wild" || face.value === "wildColor");
   const darkNonWildFaces = shuffledDarkFaces.filter((face) => face.value !== "wild" && face.value !== "wildColor");
+  const darkFlipSafeFaces = darkNonWildFaces.filter((face) => face.value !== "flip");
+  const darkFlipFaces = darkNonWildFaces.filter((face) => face.value === "flip");
 
   const lightFlipCount = lightFaces.reduce((count, face) => (face.value === "flip" ? count + 1 : count), 0);
-  const reservedForFlip = darkNonWildFaces.slice(0, lightFlipCount);
-  const remainderForOthers = shuffleCards([...darkNonWildFaces.slice(lightFlipCount), ...darkWildFaces]);
+  const reservedForFlip = darkFlipSafeFaces.slice(0, lightFlipCount);
+  const remainderForOthers = shuffleCards([...darkFlipSafeFaces.slice(lightFlipCount), ...darkFlipFaces, ...darkWildFaces]);
 
   const cards: FlipCardInternal[] = [];
   let flipIndex = 0;
