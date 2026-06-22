@@ -13,7 +13,8 @@ export interface FlipCardInternal extends Card {
   trackingId?: string;
 }
 
-const DARK_FOR_LIGHT: Record<(typeof LIGHT_COLORS)[number], (typeof DARK_COLORS)[number]> = {
+// Default mapping preserved for readability; will be randomized per deck build.
+const DEFAULT_DARK_FOR_LIGHT: Record<(typeof LIGHT_COLORS)[number], (typeof DARK_COLORS)[number]> = {
   red: "orange",
   yellow: "cyan",
   green: "purple",
@@ -38,9 +39,35 @@ function pairedCard(deckIndex: number, light: FlipFace, dark: FlipFace): FlipCar
 
 export function buildFlipDeckBox(deckIndex: number): Card[] {
   const cards: FlipCardInternal[] = [];
+  // Randomize dark-color mapping and action-value pairing so pairs differ per deck box.
+  // Controlled by env var `RANDOMIZE_FLIP_PAIRS=1`. Default behavior preserves
+  // the original deterministic mapping (keeps tests stable).
+  let darkForLight: Record<string, string>;
+  let actionPairs: Array<[CardValue, CardValue]>;
+
+  if (process.env.RANDOMIZE_FLIP_PAIRS === "1") {
+    const shuffledDarkColors = shuffleCards([...DARK_COLORS]);
+    darkForLight = {};
+    for (let i = 0; i < LIGHT_COLORS.length; i += 1) {
+      darkForLight[LIGHT_COLORS[i] as string] = shuffledDarkColors[i % shuffledDarkColors.length]!;
+    }
+
+    const lightActions: CardValue[] = ["skip", "reverse", "draw2", "flip"];
+    const darkActions: CardValue[] = ["skip", "reverse", "draw5", "flip"];
+    const shuffledDarkActions = shuffleCards([...darkActions]) as CardValue[];
+    actionPairs = lightActions.map((lv, i) => [lv, shuffledDarkActions[i]!]);
+  } else {
+    darkForLight = { ...DEFAULT_DARK_FOR_LIGHT };
+    actionPairs = [
+      ["skip", "skip"],
+      ["reverse", "reverse"],
+      ["draw2", "draw5"],
+      ["flip", "flip"]
+    ];
+  }
 
   for (const lightColor of LIGHT_COLORS) {
-    const darkColor = DARK_FOR_LIGHT[lightColor];
+    const darkColor = darkForLight[lightColor as string] as (typeof DARK_COLORS)[number];
     cards.push(pairedCard(deckIndex, { color: lightColor, value: 0 }, { color: darkColor, value: 0 }));
     for (let value = 1; value <= 9; value += 1) {
       for (let copy = 0; copy < 2; copy += 1) {
@@ -53,14 +80,7 @@ export function buildFlipDeckBox(deckIndex: number): Card[] {
         );
       }
     }
-
-    const pairs: Array<[CardValue, CardValue]> = [
-      ["skip", "skip"],
-      ["reverse", "reverse"],
-      ["draw2", "draw5"],
-      ["flip", "flip"]
-    ];
-    for (const [lightValue, darkValue] of pairs) {
+    for (const [lightValue, darkValue] of actionPairs) {
       for (let copy = 0; copy < 2; copy += 1) {
         cards.push(
           pairedCard(
