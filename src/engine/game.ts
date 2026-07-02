@@ -78,7 +78,6 @@ const CHAOS_SEQUENCE_MS = 1_300;
 const CHAOS_REVEAL_MS = 5_000;
 const CHAOS_TIMESKIP_STEP_MS = 900;
 const NUKE_COUNTDOWN_MS = 40_000;
-const NUKE_DETONATION_MS = 3_000;
 const CHAOS_ALL_SPECIAL_VALUES = new Set<CardValue>([
   "flashbang",
   "steal",
@@ -2401,21 +2400,21 @@ function resolveNukeChaos(state: GameStateInternal, pending: PendingChaosInterna
   if (pending.phase === "countdown") {
     if ((pending.countdownEndsAt ?? 0) > now) return false;
     const punished = currentPlayer(state);
-    pending.phase = "detonating";
     pending.punishedPlayerId = punished.id;
-    pending.detonationEndsAt = now + NUKE_DETONATION_MS;
-    pending.resolvesAt = pending.detonationEndsAt;
     delete state.turnDeadline;
     delete state.autoPlayPendingAt;
-    emitChaosPresentation(state, "nuke", "detonating", pending.actorId, now, pending.detonationEndsAt);
-    return true;
+    return detonateNukeChaos(state, pending, punished);
   }
 
-  if (pending.phase !== "detonating" || (pending.detonationEndsAt ?? 0) > now) {
+  if (pending.phase !== "detonating") {
     return false;
   }
 
   const punished = pending.punishedPlayerId ? findPlayer(state, pending.punishedPlayerId) : currentPlayer(state);
+  return detonateNukeChaos(state, pending, punished);
+}
+
+function detonateNukeChaos(state: GameStateInternal, pending: PendingChaosInternal, punished: PlayerState): boolean {
   const collected = collectNukePlayedCards(state, pending);
   punished.hand.push(...collected);
   punished.cardCount = punished.hand.length;
