@@ -806,7 +806,8 @@ export function playCard(
   const card = player.hand[cardIndex]!;
   const activeColor = state.activeColor;
   const discardTop = topDiscard(state);
-  if (!activeColor) {
+  const wildcardColorOpen = isAnyColorOpen(state, discardTop);
+  if (!activeColor && !wildcardColorOpen) {
     throw new GameError("missing_color", "The active color is missing.");
   }
 
@@ -823,7 +824,7 @@ export function playCard(
     if (stacking.targetPlayerId !== player.id || !canStackCard(card, stacking)) {
       throw new GameError("invalid_card", "Only a matching draw card can be stacked.");
     }
-  } else if (!mode.isPlayable(card, { playerId, activeColor, discardTop, hand: player.hand, playerCount: activePlayers(state).length })) {
+  } else if (!mode.isPlayable(card, { playerId, activeColor: activeColor ?? "red", discardTop, hand: player.hand, playerCount: activePlayers(state).length })) {
     throw new GameError("invalid_card", "That card cannot be played now.");
   }
 
@@ -852,6 +853,8 @@ export function playCard(
 
   if (card.color) {
     state.activeColor = card.color;
+  } else if (state.settings.modeId === "chaos" && isActiveChaosSpecialValue(card.value)) {
+    delete state.activeColor;
   }
 
   if (declaredColor) {
@@ -871,7 +874,7 @@ export function playCard(
   if (stacking) {
     applyStackedCard(state, player, card);
   } else {
-    applyPlayedCard(state, player, card, handBefore, { resetStackFromJumpIn: jumpingIntoStack, prevColor: activeColor });
+    applyPlayedCard(state, player, card, handBefore, { resetStackFromJumpIn: jumpingIntoStack, prevColor: activeColor ?? card.color ?? "red" });
   }
 
   if (!state.pendingChallenge && !state.pendingStack && !state.pendingFlip && !state.pendingDraw && player.hand.length === 0) {
@@ -954,15 +957,16 @@ export function playBatch(
     }
 
     const activeColor = state.activeColor;
-    if (!activeColor) {
+    const discardTop = topDiscard(state);
+    if (!activeColor && !isAnyColorOpen(state, discardTop)) {
       throw new GameError("missing_color", "The active color is missing.");
     }
 
     const mode = getMode(state.settings);
     if (!mode.isPlayable(orderedCards[0]!, {
       playerId,
-      activeColor,
-      discardTop: topDiscard(state),
+      activeColor: activeColor ?? "red",
+      discardTop,
       hand: player.hand,
       playerCount: activePlayers(state).length
     })) {
@@ -1996,6 +2000,10 @@ function isAnyChaosSpecialValue(value: CardValue): boolean {
 
 function isActiveChaosSpecialValue(value: CardValue): boolean {
   return ACTIVE_CHAOS_SPECIAL_SET.has(value);
+}
+
+function isAnyColorOpen(state: GameStateInternal, discardTop: Card): boolean {
+  return state.settings.modeId === "chaos" && discardTop.color === null && isActiveChaosSpecialValue(discardTop.value);
 }
 
 function applyChaosCard(state: GameStateInternal, player: PlayerState, card: Card): void {
