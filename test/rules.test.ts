@@ -432,13 +432,22 @@ describe("chaos mode", () => {
 
   it("allows any color after a rainbow special card", () => {
     const state = controlledChaosGame();
-    state.discardPile = [card("flashbang-top", null, "flashbang")];
     state.activeColor = "red";
-    state.players[0]!.hand = [card("blue-7", "blue", 7)];
+    state.players[0]!.hand = [card("peek", null, "peek"), card("red-9", "red", 9)];
 
-    playCard(state, "p1", "blue-7");
+    playCard(state, "p1", "peek");
+
+    expect(state.discardPile.at(-1)).toMatchObject({ id: "peek", color: null, value: "peek" });
+    expect(state.activeColor).toBeUndefined();
+
+    delete state.pendingChaos;
+    state.currentSeat = 1;
+    state.players[1]!.hand = [card("blue-7", "blue", 7)];
+
+    playCard(state, "p2", "blue-7");
 
     expect(state.discardPile.at(-1)).toMatchObject({ id: "blue-7", color: "blue", value: 7 });
+    expect(state.activeColor).toBe("blue");
   });
 
   it("allows Chaos special cards to Jump In but not answer a draw stack", () => {
