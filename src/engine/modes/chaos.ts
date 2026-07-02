@@ -3,6 +3,7 @@ import { ACTIVE_CHAOS_SPECIAL_VALUES, LIGHT_COLORS } from "@congcard/shared";
 import { shuffleCards } from "./standard.js";
 
 const CHAOS_SPECIALS = ACTIVE_CHAOS_SPECIAL_VALUES;
+const CHAOS_SPECIAL_COPIES_PER_BOX = 2;
 
 function numberCards(color: Color, deckIndex: number): Card[] {
   const cards: Card[] = [{ id: `${deckIndex}-${color}-0-0`, color, value: 0, deckIndex }];
@@ -38,12 +39,14 @@ function wildCards(deckIndex: number): Card[] {
 }
 
 function specialCards(deckIndex: number): Card[] {
-  return CHAOS_SPECIALS.map((value) => ({
-    id: `${deckIndex}-special-${value}-0`,
-    color: null,
-    value,
-    deckIndex
-  }));
+  return CHAOS_SPECIALS.flatMap((value) =>
+    Array.from({ length: CHAOS_SPECIAL_COPIES_PER_BOX }, (_, copy) => ({
+      id: `${deckIndex}-special-${value}-${copy}`,
+      color: null,
+      value,
+      deckIndex
+    }))
+  );
 }
 
 export function buildChaosDeckBox(deckIndex: number): Card[] {
@@ -77,7 +80,7 @@ function isPlayable(card: Card, ctx: TurnContext): boolean {
 
 export const chaosMode: GameMode = {
   id: "chaos",
-  initialHandSize: 7,
+  initialHandSize: 10,
   buildDeck(_playerCount, deckBoxes) {
     const cards: Card[] = [];
     for (let deckIndex = 0; deckIndex < (deckBoxes ?? 1); deckIndex += 1) {

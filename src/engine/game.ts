@@ -395,16 +395,22 @@ export function updateSettings(state: GameStateInternal, id: string, input: Room
     throw new GameError("settings_locked", "Room settings are locked after the game starts.");
   }
 
-  const scoreTargetDefault =
-    input.scoreTarget !== undefined && input.callEnabled === undefined
-      ? { callEnabled: input.scoreTarget !== "lastStand" }
+  const nextModeId = input.modeId ?? state.settings.modeId;
+  const nextScoreTarget = input.scoreTarget ?? state.settings.scoreTarget;
+  const callDefault =
+    (input.modeId !== undefined || input.scoreTarget !== undefined) && input.callEnabled === undefined
+      ? { callEnabled: nextModeId !== "chaos" && nextScoreTarget !== "lastStand" }
       : {};
-  const nextSettings = mergeRoomSettings({ ...state.settings, ...scoreTargetDefault, ...input });
+  const deckBoxDefault =
+    input.modeId !== undefined && input.deckBoxes === undefined
+      ? { deckBoxes: Math.max(state.settings.deckBoxes, requiredDeckBoxes(state.players.length, nextModeId)) }
+      : {};
+  const nextSettings = mergeRoomSettings({ ...state.settings, ...callDefault, ...deckBoxDefault, ...input });
   if (nextSettings.maxPlayers < state.players.length) {
     throw new GameError("max_players_too_low", "Max players cannot be lower than the current room size.");
   }
 
-  if (nextSettings.deckBoxes < requiredDeckBoxes(state.players.length)) {
+  if (nextSettings.deckBoxes < requiredDeckBoxes(state.players.length, nextSettings.modeId)) {
     throw new GameError("deck_boxes_too_low", "Deck boxes cannot be lower than the room minimum.");
   }
 
@@ -546,7 +552,7 @@ export function startRound(state: GameStateInternal): void {
   } else {
     delete state.flipSide;
   }
-  state.settings.deckBoxes = Math.max(state.settings.deckBoxes, requiredDeckBoxes(activePlayers.length));
+  state.settings.deckBoxes = Math.max(state.settings.deckBoxes, requiredDeckBoxes(activePlayers.length, state.settings.modeId));
   state.drawPile = mode.buildDeck(activePlayers.length, state.settings.deckBoxes);
   state.discardPile = [];
   delete state.pendingChallenge;
@@ -3815,12 +3821,12 @@ function createResumeToken(state: GameStateInternal): string {
   return token;
 }
 
-function requiredDeckBoxes(playerCount: number): number {
-  return Math.max(1, Math.ceil(playerCount / 4));
+function requiredDeckBoxes(playerCount: number, modeId: RoomSettings["modeId"] = "standard"): number {
+  return Math.max(modeId === "chaos" ? 2 : 1, Math.ceil(playerCount / 4));
 }
 
 function syncDeckBoxMinimum(state: GameStateInternal): void {
-  state.settings.deckBoxes = Math.max(state.settings.deckBoxes, requiredDeckBoxes(state.players.length));
+  state.settings.deckBoxes = Math.max(state.settings.deckBoxes, requiredDeckBoxes(state.players.length, state.settings.modeId));
 }
 
 function markMissedDisconnectedTurn(state: GameStateInternal, player: PlayerState): void {
