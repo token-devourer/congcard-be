@@ -363,13 +363,29 @@ describe("chaos mode", () => {
   it("builds a playable chaos deck with selected meme cards only", () => {
     const deck = chaosMode.buildDeck(4);
 
-    expect(deck).toHaveLength(122);
+    expect(deck).toHaveLength(128);
     expect(deck.filter((item) => item.value === "draw1")).toHaveLength(8);
     expect(deck.filter((item) => item.value === "wild2")).toHaveLength(4);
     expect(deck.filter((item) => item.value === "throwup")).toHaveLength(8);
-    expect(deck.filter((item) => item.value === "flashbang")).toHaveLength(1);
+    expect(deck.filter((item) => item.value === "flashbang")).toHaveLength(2);
     expect(deck.filter((item) => item.value === "vote")).toHaveLength(0);
     expect(deck.filter((item) => item.value === "mirror")).toHaveLength(0);
+  });
+
+  it("starts Chaos rounds with 10 cards and at least two deck boxes", () => {
+    const state = createGame("CHAOS3", { modeId: "chaos" });
+    addPlayer(state, "p1", "Ava", "sun");
+    addPlayer(state, "p2", "Ben", "moon");
+    setReady(state, "p2", true);
+
+    expect(state.settings.deckBoxes).toBe(2);
+    expect(() => updateSettings(state, "p1", { deckBoxes: 1 })).toThrow("room minimum");
+
+    startRound(state);
+    finishAutomaticDeal(state);
+
+    expect(state.settings.deckBoxes).toBe(2);
+    expect(state.players.every((player) => player.hand.length >= 10)).toBe(true);
   });
 
   it("uses +1 colored draw penalties", () => {
@@ -423,6 +439,27 @@ describe("chaos mode", () => {
     playCard(state, "p1", "blue-7");
 
     expect(state.discardPile.at(-1)).toMatchObject({ id: "blue-7", color: "blue", value: 7 });
+  });
+
+  it("allows Chaos special cards to Jump In but not answer a draw stack", () => {
+    const state = controlledChaosGame();
+    state.settings.jumpInEnabled = true;
+    state.settings.stackingEnabled = true;
+    state.discardPile = [card("flashbang-top", null, "flashbang")];
+    state.players[1]!.hand = [card("flashbang-jump", null, "flashbang")];
+
+    playCard(state, "p2", "flashbang-jump");
+
+    expect(state.pendingChaos).toMatchObject({ kind: "flashbang", actorId: "p2" });
+
+    const stacked = controlledChaosGame();
+    stacked.settings.jumpInEnabled = true;
+    stacked.settings.stackingEnabled = true;
+    stacked.pendingStack = { kind: "wild2", targetPlayerId: "p1", totalDraw: 2 };
+    stacked.discardPile = [card("flashbang-top", null, "flashbang")];
+    stacked.players[1]!.hand = [card("flashbang-blocked", null, "flashbang")];
+
+    expect(() => playCard(stacked, "p2", "flashbang-blocked")).toThrow("It is not your turn.");
   });
 
   it("resolves Steal by target and card choice", () => {

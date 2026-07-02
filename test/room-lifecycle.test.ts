@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { joinOptionsSchema, playBatchSchema, roomCodeSchema } from "@congcard/shared";
+import { joinOptionsSchema, mergeRoomSettings, playBatchSchema, roomCodeSchema } from "@congcard/shared";
 import {
   addPlayer,
   createGame,
@@ -94,10 +94,15 @@ describe("room lifecycle", () => {
     expect(state.settings.autoPlayCallOne).toBe(true);
   });
 
-  it("defaults One and Catch off for Last Stand and back on for normal scoring", () => {
+  it("defaults One and Catch off for Last Stand and Chaos, then back on for normal rules", () => {
     const state = createGame("ROOM45");
     addPlayer(state, "host", "Host", "sun");
     addPlayer(state, "guest", "Guest", "moon");
+
+    expect(mergeRoomSettings({ modeId: "chaos" }).callEnabled).toBe(false);
+    expect(mergeRoomSettings({ modeId: "chaos" }).deckBoxes).toBe(2);
+    expect(createGame("CHAOS1", { modeId: "chaos" }).settings.callEnabled).toBe(false);
+    expect(createGame("CHAOS1", { modeId: "chaos" }).settings.deckBoxes).toBe(2);
 
     updateSettings(state, "host", { scoreTarget: "lastStand" });
     expect(state.settings.scoreTarget).toBe("lastStand");
@@ -105,6 +110,15 @@ describe("room lifecycle", () => {
 
     updateSettings(state, "host", { scoreTarget: 0 });
     expect(state.settings.scoreTarget).toBe(0);
+    expect(state.settings.callEnabled).toBe(true);
+
+    updateSettings(state, "host", { modeId: "chaos" });
+    expect(state.settings.modeId).toBe("chaos");
+    expect(state.settings.callEnabled).toBe(false);
+    expect(state.settings.deckBoxes).toBe(2);
+
+    updateSettings(state, "host", { modeId: "standard" });
+    expect(state.settings.modeId).toBe("standard");
     expect(state.settings.callEnabled).toBe(true);
   });
 
