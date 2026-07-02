@@ -538,6 +538,70 @@ describe("chaos mode", () => {
     expect(state.players[0]!.hand.some((item) => item.id === "red-1")).toBe(true);
   });
 
+  it("cancels a pending draw stack when the Nuke detonates so the room cannot deadlock", () => {
+    const state = controlledChaosGame();
+    state.settings.stackingEnabled = true;
+    state.players[0]!.hand = [card("nuke", null, "nuke"), card("green-draw1", "green", "draw1"), card("blue-8", "blue", 8)];
+    state.players[1]!.hand = [card("red-draw1", "red", "draw1"), card("blue-3", "blue", 3), card("blue-4", "blue", 4)];
+
+    playCard(state, "p1", "nuke");
+    expect(state.pendingChaos).toMatchObject({ kind: "nuke", phase: "countdown" });
+
+    // p2 opens a +1 stack during the countdown; p1 holds a +1, so the stack stays live.
+    playCard(state, "p2", "red-draw1");
+    expect(state.pendingStack).toMatchObject({ kind: "draw1", targetPlayerId: "p1" });
+    expect(snapshotFor(state).currentPlayerId).toBe("p1");
+
+    state.pendingChaos!.countdownEndsAt = 0;
+    expect(resolvePendingChaos(state)).toBe(true);
+
+    // Detonation reclaims the stacked +1 into p1's hand, so the stack must dissolve
+    // instead of pinning a target the seat has already moved past.
+    expect(state.pendingChaos).toBeUndefined();
+    expect(state.pendingStack).toBeUndefined();
+    expect(state.players[0]!.hand.some((item) => item.id === "red-draw1")).toBe(true);
+    expect(snapshotFor(state).currentPlayerId).toBe("p2");
+    playCard(state, "p2", "blue-3");
+    expect(state.discardPile.at(-1)).toMatchObject({ id: "blue-3" });
+  });
+
+  it("defers Nuke detonation while a draw reveal is mid-flight", () => {
+    const state = controlledChaosGame();
+    state.players[0]!.hand = [card("nuke", null, "nuke"), card("blue-8", "blue", 8)];
+    state.players[1]!.hand = [card("blue-3", "blue", 3), card("blue-4", "blue", 4)];
+
+    playCard(state, "p1", "nuke");
+    drawCard(state, "p2");
+    expect(state.pendingDraw).toBeDefined();
+
+    state.pendingChaos!.countdownEndsAt = 0;
+    expect(resolvePendingChaos(state)).toBe(false);
+    expect(state.pendingChaos).toMatchObject({ kind: "nuke", phase: "countdown" });
+
+    settlePendingDraw(state);
+    expect(resolvePendingChaos(state)).toBe(true);
+    expect(state.pendingChaos).toBeUndefined();
+  });
+
+  it("realigns the turn seat with the stack target instead of deadlocking", () => {
+    const state = controlledChaosGame();
+    state.settings.stackingEnabled = true;
+    state.players[0]!.hand = [card("green-draw1", "green", "draw1"), card("blue-8", "blue", 8)];
+    state.players[1]!.hand = [card("blue-draw1", "blue", "draw1"), card("blue-3", "blue", 3)];
+
+    // Simulate drifted state: the stack targets p1 but the seat moved on to p2.
+    state.pendingStack = { kind: "draw1", targetPlayerId: "p1", totalDraw: 1 };
+    state.currentSeat = 1;
+
+    expect(resolveAutomatedTurns(state)).toBe(true);
+    expect(snapshotFor(state).currentPlayerId).toBe("p1");
+    expect(state.pendingStack).toMatchObject({ targetPlayerId: "p1" });
+
+    // The target can now actually answer the stack.
+    playCard(state, "p1", "green-draw1");
+    expect(state.pendingStack).toMatchObject({ kind: "draw1", targetPlayerId: "p2", totalDraw: 2 });
+  });
+
   it("eliminates players who draw past 25 cards", () => {
     const state = controlledChaosGame();
     state.players[0]!.hand = [card("red-draw1", "red", "draw1"), card("red-9", "red", 9)];

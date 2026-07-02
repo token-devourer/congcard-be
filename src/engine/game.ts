@@ -1603,8 +1603,19 @@ export function resolveAutomatedTurns(state: GameStateInternal): boolean {
       return changed;
     }
 
-    const player = currentPlayer(state);
+    let player = currentPlayer(state);
     if (state.pendingStack) {
+      // Invariant: while a stack is pending, the seat belongs to its target —
+      // only the target may act, so any drift (e.g. an effect that moved the
+      // seat past the target) would deadlock the room. Snap the seat back.
+      const stackTarget = state.players.find((item) => item.id === state.pendingStack!.targetPlayerId);
+      if (stackTarget && !stackTarget.finishedRank && player.id !== stackTarget.id) {
+        state.currentSeat = stackTarget.seat;
+        setTurnDeadline(state);
+        player = currentPlayer(state);
+        changed = true;
+      }
+
       if (settlePendingStackIfUnstackable(state)) {
         changed = true;
         continue;
@@ -2399,6 +2410,10 @@ function timeSkipAutoPlayable(state: GameStateInternal, card: Card): boolean {
 function resolveNukeChaos(state: GameStateInternal, pending: PendingChaosInternal, now: number): boolean {
   if (pending.phase === "countdown") {
     if ((pending.countdownEndsAt ?? 0) > now) return false;
+    // Hold the detonation while a draw/batch/flip animation is mid-flight:
+    // those flows move the seat on their own, so detonating now would punish
+    // whoever the seat happens to point at rather than the active player.
+    if (state.pendingDraw || state.pendingBatchPlay || state.pendingFlip) return false;
     const punished = currentPlayer(state);
     pending.punishedPlayerId = punished.id;
     delete state.turnDeadline;
@@ -2419,6 +2434,15 @@ function detonateNukeChaos(state: GameStateInternal, pending: PendingChaosIntern
   punished.hand.push(...collected);
   punished.cardCount = punished.hand.length;
   delete punished.drawnCardId;
+  // A draw stack built during the countdown is made of countdown-played cards,
+  // and those just moved into the punished hand. Keeping the stack alive would
+  // wedge the room: the seat moves on while only the stack target may act.
+  delete state.pendingStack;
+  delete state.pendingChallenge;
+  if (punished.hand.length !== 1) {
+    punished.calledOne = false;
+    closeOneWindowForPlayer(state, punished.id);
+  }
   pushLog(state, "draw", `${punished.nickname} took ${collected.length} Nuke countdown card${collected.length === 1 ? "" : "s"}.`, false);
   delete state.pendingChaos;
   if (checkChaosEliminations(state)) {
