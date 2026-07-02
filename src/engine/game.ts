@@ -43,6 +43,10 @@ import { buildChaosDeckBox, chaosMode, isChaosSpecialValue } from "./modes/chaos
 // constants anchor the floor and the steady-state window length.
 const MIN_ONE_DELAY_MS = 200;
 const ONE_DELAY_EXTRA_MS = 150;
+// A single inflated ping report (e.g. a probe that queued behind a snapshot
+// burst) must not stretch the whole table's animation scheduling; leads only
+// ever count up to this much of a player's reported ping.
+const PING_LEAD_CAP_MS = 400;
 const ONE_CALL_WINDOW_MS = 4000;
 const ONE_CALL_SETTLE_MS = 250;
 const AUTO_ACTION_DELAY_MS = 1400;
@@ -974,7 +978,7 @@ export function playBatch(
   }
 
   const now = Date.now();
-  const highestPing = activePlayers(state).reduce((highest, item) => Math.max(highest, item.connected ? item.ping : 0), 0);
+  const highestPing = activePlayers(state).reduce((highest, item) => Math.max(highest, item.connected ? leadPing(item.ping) : 0), 0);
   const leadMs = Math.max(BATCH_SYNC_MIN_LEAD_MS, Math.min(BATCH_SYNC_MAX_LEAD_MS, highestPing + BATCH_SYNC_EXTRA_MS));
   const intervalMs = Math.min(
     BATCH_MAX_CARD_INTERVAL_MS,
@@ -1112,8 +1116,12 @@ export function resolvePendingFlip(state: GameStateInternal): boolean {
 }
 
 function flipSyncLead(state: GameStateInternal): number {
-  const maxPing = Math.max(...state.players.filter(isAvailablePlayer).map((player) => player.ping), 0);
+  const maxPing = Math.max(...state.players.filter(isAvailablePlayer).map((player) => leadPing(player.ping)), 0);
   return Math.max(FLIP_SYNC_MIN_LEAD_MS, Math.ceil(maxPing / 2) + FLIP_SYNC_EXTRA_MS);
+}
+
+function leadPing(ping: number): number {
+  return Math.min(ping, PING_LEAD_CAP_MS);
 }
 
 export function drawCard(state: GameStateInternal, playerId: string, automated = false): void {
@@ -2694,7 +2702,7 @@ function updateOneWindowAfterPlay(state: GameStateInternal, player: PlayerState)
     // ensures every client has the data in hand when opensAt fires.
     const activePings = state.players
       .filter((p) => p.connected && !p.away && p.id !== player.id)
-      .map((p) => p.ping);
+      .map((p) => leadPing(p.ping));
     const maxPing = Math.max(...activePings, 0);
     const networkDelay = Math.max(Math.ceil(maxPing / 2) + ONE_DELAY_EXTRA_MS, MIN_ONE_DELAY_MS);
 
@@ -2989,7 +2997,7 @@ function checkChaosEliminations(state: GameStateInternal): boolean {
 }
 
 function drawSyncLead(state: GameStateInternal): number {
-  const maxPing = Math.max(...state.players.filter((player) => player.connected).map((player) => player.ping), 0);
+  const maxPing = Math.max(...state.players.filter((player) => player.connected).map((player) => leadPing(player.ping)), 0);
   return Math.max(DRAW_NEXT_GAP_MS, Math.ceil(maxPing / 2) + DRAW_SYNC_EXTRA_MS);
 }
 
@@ -3462,7 +3470,7 @@ function syncDealProgress(state: GameStateInternal): void {
 }
 
 function dealSyncLead(state: GameStateInternal): number {
-  const maxPing = Math.max(...state.players.filter(isAvailablePlayer).map((player) => player.ping), 0);
+  const maxPing = Math.max(...state.players.filter(isAvailablePlayer).map((player) => leadPing(player.ping)), 0);
   return Math.max(DEAL_SYNC_MIN_LEAD_MS, Math.ceil(maxPing / 2) + DEAL_SYNC_EXTRA_MS);
 }
 

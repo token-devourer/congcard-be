@@ -69,6 +69,10 @@ interface ClientRateBucket {
 
 const CLIENT_MESSAGE_WINDOW_MS = 10_000;
 const CLIENT_MESSAGE_LIMIT = 80;
+// Ping-only changes are cosmetic; flushing them at the tick rate kept the
+// room chattering full snapshots even when idle, and that very chatter queued
+// ahead of ping probes and inflated the next measurements.
+const PING_FLUSH_INTERVAL_MS = 2_000;
 
 export class GameRoom extends Room {
   maxClients = 40;
@@ -77,6 +81,7 @@ export class GameRoom extends Room {
   // Pings change constantly; coalesce them into the next ticker broadcast
   // instead of fanning out a full snapshot on every ping message.
   private pingDirty = false;
+  private nextPingFlushAt = 0;
 
   onCreate(options: GameRoomOptions): void {
     const settings = roomSettingsUpdateSchema.parse(options.settings ?? {});
@@ -106,7 +111,7 @@ export class GameRoom extends Room {
           autoPlayedBeforeTimeout ||
           timedOut ||
           autoPlayedAfterTimeout ||
-          this.pingDirty
+          (this.pingDirty && Date.now() >= this.nextPingFlushAt)
         ) {
           this.broadcastState();
         }
@@ -248,10 +253,19 @@ export class GameRoom extends Room {
 
       const ping = typeof message?.ping === "number" ? Math.round(Math.max(0, Math.min(message.ping, 60_000))) : 0;
       const player = this.game.players.find((p) => p.id === client.sessionId);
-      if (player && player.ping !== ping) {
-        player.ping = ping;
-        // Mark dirty; the 100ms ticker flushes it, bounding ping-driven
-        // broadcasts to the tick rate regardless of client count.
+      if (!player) {
+        return;
+      }
+
+      // Smooth toward the sample: a probe that queued behind a snapshot burst
+      // reads hundreds of ms even on a healthy link, and the raw value feeds
+      // every sync-lead calculation. A real latency shift still converges
+      // within a few one-second probes.
+      const smoothed = player.ping === 0 ? ping : Math.round(player.ping * 0.6 + ping * 0.4);
+      if (player.ping !== smoothed) {
+        player.ping = smoothed;
+        // Mark dirty; the ticker flushes it no faster than the ping flush
+        // interval, bounding ping-driven broadcasts regardless of client count.
         this.pingDirty = true;
       }
     });
@@ -303,6 +317,7 @@ export class GameRoom extends Room {
   private broadcastState(): void {
     // Any full broadcast already carries the latest pings, so clear the flag.
     this.pingDirty = false;
+    this.nextPingFlushAt = Date.now() + PING_FLUSH_INTERVAL_MS;
     for (const client of this.clients) {
       client.send("state", snapshotFor(this.game, client.sessionId));
     }
