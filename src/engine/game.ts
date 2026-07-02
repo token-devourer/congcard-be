@@ -472,6 +472,7 @@ export function kickPlayer(state: GameStateInternal, hostId: string, targetId: s
       delete state.pendingBatchPlay;
     }
 
+    let chaosCleared = false;
     if (
       state.pendingChaos?.actorId === targetId ||
       state.pendingChaos?.targetId === targetId ||
@@ -479,6 +480,7 @@ export function kickPlayer(state: GameStateInternal, hostId: string, targetId: s
       state.pendingChaos?.punishedPlayerId === targetId
     ) {
       delete state.pendingChaos;
+      chaosCleared = true;
     }
 
     // Resolve the next seat while the target still exists, then fold their
@@ -489,6 +491,10 @@ export function kickPlayer(state: GameStateInternal, hostId: string, targetId: s
     state.drawPile = shuffleCards([...state.drawPile, ...target.hand]);
     state.currentSeat = nextSeat;
     if (wasCurrent) {
+      setTurnDeadline(state);
+    } else if (chaosCleared && !state.turnDeadline) {
+      // The chaos effect had cleared the turn deadline when it started; with
+      // the effect gone the current player needs a live timeout again.
       setTurnDeadline(state);
     }
 
@@ -880,7 +886,15 @@ export function playCard(
     applyPlayedCard(state, player, card, handBefore, { resetStackFromJumpIn: jumpingIntoStack, prevColor: activeColor ?? card.color ?? "red" });
   }
 
-  if (!state.pendingChallenge && !state.pendingStack && !state.pendingFlip && !state.pendingDraw && player.hand.length === 0) {
+  if (
+    state.phase === "playing" &&
+    !player.finishedRank &&
+    !state.pendingChallenge &&
+    !state.pendingStack &&
+    !state.pendingFlip &&
+    !state.pendingDraw &&
+    player.hand.length === 0
+  ) {
     finishPlayerOrCompleteRound(state, player.id);
   }
 }
@@ -2164,10 +2178,18 @@ function startNukeCountdown(state: GameStateInternal, player: PlayerState): void
     startsAt: now,
     countdownEndsAt: now + NUKE_COUNTDOWN_MS
   };
-  if (finishChaosCard(state, player)) {
+  const finished = finishChaosCard(state, player);
+  if (state.phase !== "playing") {
     return;
   }
-  advanceTurn(state);
+  // Even when the actor just finished (the Nuke was their last card), the
+  // round continues and the armed countdown must not leave the seat parked
+  // on a finished player.
+  if (!finished || currentPlayer(state).id === player.id) {
+    advanceTurn(state);
+  } else {
+    setTurnDeadline(state);
+  }
   emitChaosPresentation(state, "nuke", "countdown", player.id, now, now + NUKE_COUNTDOWN_MS);
 }
 
@@ -2361,7 +2383,12 @@ function resolveTimeSkipAutoplay(state: GameStateInternal, pending: PendingChaos
   if (index >= targets.length) {
     const actor = findPlayer(state, pending.actorId);
     delete state.pendingChaos;
-    state.currentSeat = actor.seat;
+    if (state.phase !== "playing") {
+      return true;
+    }
+    // The actor may have finished mid-skip (e.g. the Time Skip was their last
+    // card); parking the seat on a finished player would stall until timeout.
+    state.currentSeat = actor.finishedRank ? seatAfter(state, actor.seat) : actor.seat;
     setTurnDeadline(state);
     pushLog(state, "skip", `${actor.nickname}'s Time Skip returned the turn.`, false);
     return true;
@@ -2402,6 +2429,11 @@ function resolveTimeSkipAutoTurn(state: GameStateInternal, player: PlayerState):
     ...(state.activeColor ? { color: state.activeColor } : {}),
     level: sameValueDiscardRun(state, card.value)
   });
+  // An auto-play that empties the hand must finish the player like any other
+  // play would; otherwise they stay seated with zero cards and no rank.
+  if (player.hand.length === 0 && !player.finishedRank) {
+    finishPlayerOrCompleteRound(state, player.id);
+  }
 }
 
 function timeSkipAutoPlayable(state: GameStateInternal, card: Card): boolean {
@@ -2475,10 +2507,17 @@ function collectNukePlayedCards(state: GameStateInternal, pending: PendingChaosI
 function finishPendingChaos(state: GameStateInternal, actorId: string, advance: boolean): void {
   const actor = findPlayer(state, actorId);
   delete state.pendingChaos;
-  if (finishChaosCard(state, actor)) {
+  const finished = finishChaosCard(state, actor);
+  if (state.phase !== "playing") {
     return;
   }
-  if (advance) {
+  // When the effect finished the actor (or busted players and moved the seat),
+  // the round still needs a live turn: never leave the seat on a finished
+  // player or the deadline unset.
+  const seatOnActor = currentPlayer(state).id === actor.id;
+  if (seatOnActor && (advance || Boolean(actor.finishedRank))) {
+    advanceTurn(state);
+  } else if (!finished && advance) {
     advanceTurn(state);
   } else {
     setTurnDeadline(state);
@@ -2832,6 +2871,12 @@ function scoreHandBreakdown(hand: Card[]): { numberPoints: number; actionPoints:
 }
 
 function completeRound(state: GameStateInternal, winnerId: string): void {
+  // A round can only be completed once: a second call (e.g. a chaos effect and
+  // the play that triggered it both detecting the empty hand) would add the
+  // losers' hand points to the winner's score a second time.
+  if (state.phase === "roundEnd" || state.phase === "gameEnd") {
+    return;
+  }
   const winner = findPlayer(state, winnerId);
   const losers = state.players.filter((player) => player.id !== winnerId);
   const breakdownPlayers = losers.map((player) => {
@@ -2864,8 +2909,13 @@ function completeRound(state: GameStateInternal, winnerId: string): void {
   delete state.turnDeadline;
   delete state.pendingChallenge;
   delete state.pendingStack;
+  delete state.pendingBatchPlay;
+  delete state.pendingChaos;
+  delete state.pendingDraw;
+  delete state.pendingFlip;
   delete state.oneWindow;
   delete state.pendingOneCall;
+  delete state.pauseReason;
   pushLog(state, "round", `${winner.nickname} won the round with ${score} points.`, {
     kind: "roundEnd",
     actorId: winner.id,
@@ -2960,6 +3010,7 @@ function checkChaosEliminations(state: GameStateInternal): boolean {
     player.hand = [];
     player.cardCount = 0;
     player.calledOne = false;
+    delete player.drawnCardId;
     player.finishedRank = (state.lastStandPlacements?.length ?? 0) + 1;
     closeOneWindowForPlayer(state, player.id);
     state.lastStandPlacements = [
@@ -3134,6 +3185,23 @@ export function drawColorCard(state: GameStateInternal, playerId: string): void 
 export function resolvePendingDraw(state: GameStateInternal): boolean {
   const pending = state.pendingDraw;
   if (!pending) return false;
+  if (state.phase !== "playing") {
+    // The round ended mid-draw (e.g. a chaos bust eliminated everyone else);
+    // letting the reveal keep ticking would run its continuation into the
+    // round-end state and could complete the round a second time.
+    delete state.pendingDraw;
+    return true;
+  }
+  const drawer = state.players.find((player) => player.id === pending.playerId);
+  if (drawer?.finishedRank && !pending.settlesAt) {
+    // The drawer busted out mid-draw: stop dealing cards into a dead hand.
+    // A card already revealed mid-flight goes back under the draw pile.
+    if (pending.reveal) {
+      state.drawPile.unshift(pending.reveal.card);
+    }
+    beginPendingDrawSettle(state);
+    return true;
+  }
   const now = Date.now();
 
   if (pending.settlesAt) {

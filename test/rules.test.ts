@@ -16,6 +16,7 @@ import {
   drawColorCard,
   expireOneWindow,
   handleTurnTimeout,
+  kickPlayer,
   playBatch,
   playCard,
   resolveAutomatedTurns,
@@ -455,7 +456,7 @@ describe("chaos mode", () => {
     state.settings.jumpInEnabled = true;
     state.settings.stackingEnabled = true;
     state.discardPile = [card("flashbang-top", null, "flashbang")];
-    state.players[1]!.hand = [card("flashbang-jump", null, "flashbang")];
+    state.players[1]!.hand = [card("flashbang-jump", null, "flashbang"), card("blue-3", "blue", 3)];
 
     playCard(state, "p2", "flashbang-jump");
 
@@ -615,6 +616,127 @@ describe("chaos mode", () => {
     expect(state.roundWinnerId).toBe("p1");
     expect(state.players[1]!.finishedRank).toBe(1);
     expect(state.players[1]!.hand).toHaveLength(0);
+  });
+
+  it("finishes a player whose hand empties during a Time Skip auto-play", () => {
+    const state = controlledChaosGame();
+    state.players[0]!.hand = [card("timeskip", null, "timeskip"), card("red-9", "red", 9)];
+    state.players[1]!.hand = [card("red-3", "red", 3)];
+
+    playCard(state, "p1", "timeskip");
+    expect(state.pendingChaos).toMatchObject({ kind: "timeskip", phase: "autoplay" });
+
+    state.pendingChaos!.nextAutoAt = 0;
+    expect(resolvePendingChaos(state)).toBe(true);
+
+    // p2's only card was auto-played: that is a finished hand, not a zombie seat.
+    expect(state.players[1]!.hand).toHaveLength(0);
+    expect(state.phase).toBe("roundEnd");
+    expect(state.roundWinnerId).toBe("p2");
+    expect(state.pendingChaos).toBeUndefined();
+  });
+
+  it("does not double-score the round when the Nuke is the winning card", () => {
+    const state = controlledChaosGame();
+    state.players[0]!.hand = [card("nuke", null, "nuke")];
+    state.players[1]!.hand = [card("red-9", "red", 9), card("wild", null, "wild")];
+
+    playCard(state, "p1", "nuke");
+
+    expect(state.phase).toBe("roundEnd");
+    expect(state.roundWinnerId).toBe("p1");
+    // red-9 (9) + wild (50) exactly once — the chaos finish and the play-card
+    // finish must not both complete the round.
+    expect(state.players[0]!.score).toBe(59);
+    expect(state.pendingChaos).toBeUndefined();
+  });
+
+  it("returns the turn past a Time Skip actor who finished mid-skip", () => {
+    const state = createGame("CHAOS4", { modeId: "chaos", scoreTarget: "lastStand", turnTimeoutSec: 30 });
+    addPlayer(state, "p1", "Ava", "sun");
+    addPlayer(state, "p2", "Ben", "moon");
+    addPlayer(state, "p3", "Cy", "star");
+    state.phase = "playing";
+    state.activeColor = "red";
+    state.discardPile = [card("discard-red-5", "red", 5)];
+    state.drawPile = drawPile();
+    state.currentSeat = 0;
+    state.direction = 1;
+    state.players[0]!.hand = [card("timeskip", null, "timeskip")];
+    state.players[1]!.hand = [card("wild-b", null, "wild")];
+    state.players[2]!.hand = [card("wild-c", null, "wild")];
+
+    // The Time Skip is p1's last card: they finish immediately, the skip plays on.
+    playCard(state, "p1", "timeskip");
+    expect(state.players[0]!.finishedRank).toBe(1);
+    expect(state.pendingChaos).toMatchObject({ kind: "timeskip" });
+
+    for (let step = 0; step < 3 && state.pendingChaos; step += 1) {
+      state.pendingChaos.nextAutoAt = 0;
+      resolvePendingChaos(state);
+    }
+
+    // The seat must not park on the finished actor waiting for a timeout.
+    expect(state.pendingChaos).toBeUndefined();
+    expect(snapshotFor(state).currentPlayerId).toBe("p2");
+    expect(state.turnDeadline).toBeDefined();
+  });
+
+  it("stops dealing penalty cards into a hand that busted mid-draw", () => {
+    const state = createGame("CHAOS5", { modeId: "chaos", turnTimeoutSec: 30 });
+    addPlayer(state, "p1", "Ava", "sun");
+    addPlayer(state, "p2", "Ben", "moon");
+    addPlayer(state, "p3", "Cy", "star");
+    state.phase = "playing";
+    state.activeColor = "red";
+    state.discardPile = [card("discard-red-5", "red", 5)];
+    state.drawPile = drawPile();
+    state.currentSeat = 0;
+    state.direction = 1;
+    state.players[0]!.hand = [card("wild2", null, "wild2"), card("red-9", "red", 9)];
+    state.players[1]!.hand = Array.from({ length: 25 }, (_, index) => card(`p2-${index}`, "blue", (index % 10) as Card["value"]));
+    state.players[1]!.cardCount = 25;
+    state.players[2]!.hand = [card("green-2", "green", 2)];
+
+    // +2 penalty: the first revealed card busts p2 past 25 with one card left to draw.
+    playCard(state, "p1", "wild2", "blue");
+    settlePendingDraw(state);
+
+    expect(state.players[1]!.finishedRank).toBe(1);
+    expect(state.players[1]!.hand).toHaveLength(0);
+    expect(state.phase).toBe("playing");
+    expect(state.pendingDraw).toBeUndefined();
+    expect(snapshotFor(state).currentPlayerId).toBe("p3");
+    expect(state.turnDeadline).toBeDefined();
+  });
+
+  it("restores the turn deadline when a chaos participant is kicked", () => {
+    const state = createGame("CHAOS6", { modeId: "chaos", turnTimeoutSec: 30 });
+    addPlayer(state, "p1", "Ava", "sun");
+    addPlayer(state, "p2", "Ben", "moon");
+    addPlayer(state, "p3", "Cy", "star");
+    state.phase = "playing";
+    state.activeColor = "red";
+    state.discardPile = [card("discard-red-5", "red", 5)];
+    state.drawPile = drawPile();
+    state.currentSeat = 1;
+    state.direction = 1;
+    state.players[0]!.hand = [card("green-2", "green", 2)];
+    state.players[1]!.hand = [card("favor", null, "favor"), card("red-9", "red", 9)];
+    state.players[2]!.hand = [card("blue-7", "blue", 7)];
+
+    playCard(state, "p2", "favor");
+    chooseChaosTarget(state, "p2", "p3");
+    expect(state.pendingChaos).toMatchObject({ kind: "favor", phase: "chooseCard", chooserId: "p3" });
+    expect(state.turnDeadline).toBeUndefined();
+
+    // Host kicks the favor target: the effect dissolves, but the current
+    // player (p2) must get a live timeout back, not an idle room.
+    kickPlayer(state, "p1", "p3");
+
+    expect(state.pendingChaos).toBeUndefined();
+    expect(state.turnDeadline).toBeDefined();
+    expect(snapshotFor(state).currentPlayerId).toBe("p2");
   });
 });
 
