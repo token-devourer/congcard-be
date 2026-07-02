@@ -534,9 +534,7 @@ describe("chaos mode", () => {
     expect(snapshotFor(state).currentPlayerId).toBe("p1");
     state.pendingChaos!.countdownEndsAt = 0;
     expect(resolvePendingChaos(state)).toBe(true);
-    expect(state.pendingChaos).toMatchObject({ phase: "detonating", punishedPlayerId: "p1" });
-    state.pendingChaos!.detonationEndsAt = 0;
-    expect(resolvePendingChaos(state)).toBe(true);
+    expect(state.pendingChaos).toBeUndefined();
     expect(state.players[0]!.hand.some((item) => item.id === "red-1")).toBe(true);
   });
 
