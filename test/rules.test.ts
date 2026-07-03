@@ -84,6 +84,26 @@ describe("flip mode", () => {
     expect(snapshotFor(state, "p1").self?.hand[0]).not.toHaveProperty("flipFaces");
   });
 
+  it("scores Flip cards with Flip-specific wild values", () => {
+    const state = controlledFlipGame();
+    state.players[0]!.hand = [card("red-1", "red", 1)];
+    state.players[1]!.hand = [
+      card("wild", null, "wild"),
+      card("wild3", null, "wild3"),
+      card("wildColor", null, "wildColor"),
+      card("draw5", "orange", "draw5")
+    ];
+
+    playCard(state, "p1", "red-1");
+
+    expect(state.roundScore?.total).toBe(170);
+    expect(state.roundScore?.players.find((player) => player.playerId === "p2")).toMatchObject({
+      actionPoints: 20,
+      wildPoints: 150,
+      handValue: 170
+    });
+  });
+
   it("never pairs light flip cards with wild or flip on the dark face when randomized", () => {
     const previous = config.randomizeFlipPairs;
     config.randomizeFlipPairs = true;
@@ -686,6 +706,26 @@ describe("chaos mode", () => {
     // finish must not both complete the round.
     expect(state.players[0]!.score).toBe(59);
     expect(state.pendingChaos).toBeUndefined();
+  });
+
+  it("scores Chaos rainbow special cards as special wild points", () => {
+    const state = controlledChaosGame();
+    state.players[0]!.hand = [card("red-1", "red", 1)];
+    state.players[1]!.hand = [
+      card("flashbang", null, "flashbang"),
+      card("nuke", null, "nuke"),
+      card("wild2", null, "wild2"),
+      card("throwup", "red", "throwup")
+    ];
+
+    playCard(state, "p1", "red-1");
+
+    expect(state.roundScore?.total).toBe(170);
+    expect(state.roundScore?.players[0]).toMatchObject({
+      actionPoints: 20,
+      wildPoints: 150,
+      handValue: 170
+    });
   });
 
   it("returns the turn past a Time Skip actor who finished mid-skip", () => {

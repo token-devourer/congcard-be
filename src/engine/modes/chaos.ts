@@ -92,7 +92,7 @@ export const chaosMode: GameMode = {
   scoreHand(hand) {
     return hand.reduce((score, card) => {
       if (typeof card.value === "number") return score + card.value;
-      if (card.value === "wild" || card.value === "wild2") return score + 50;
+      if (card.value === "wild" || card.value === "wild2" || isChaosSpecial(card.value)) return score + 50;
       return score + 20;
     }, 0);
   },

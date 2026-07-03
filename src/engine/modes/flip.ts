@@ -190,7 +190,10 @@ export const flipMode: GameMode = {
   scoreHand(hand) {
     return hand.reduce((score, card) => {
       if (typeof card.value === "number") return score + card.value;
-      if (["wild", "wild3", "wildColor"].includes(String(card.value))) return score + 50;
+      if (card.value === "wild") return score + 40;
+      if (card.value === "wild3") return score + 50;
+      if (card.value === "wildColor") return score + 60;
+      if (card.value === "draw1") return score + 10;
       return score + 20;
     }, 0);
   },

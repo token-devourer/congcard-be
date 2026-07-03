@@ -2861,22 +2861,36 @@ function maybeCompleteLastStandRound(state: GameStateInternal): boolean {
   return true;
 }
 
-function scoreHandBreakdown(hand: Card[]): { numberPoints: number; actionPoints: number; wildPoints: number; handValue: number } {
+function scoreHandBreakdown(state: GameStateInternal, hand: Card[]): { numberPoints: number; actionPoints: number; wildPoints: number; handValue: number } {
+  const mode = getMode(state.settings);
   let numberPoints = 0;
   let actionPoints = 0;
   let wildPoints = 0;
 
   for (const card of hand) {
+    const value = mode.scoreHand([card]);
     if (typeof card.value === "number") {
-      numberPoints += card.value;
-    } else if (card.value === "wild" || card.value === "wild2" || card.value === "wild3" || card.value === "wild4" || card.value === "wildColor") {
-      wildPoints += 50;
+      numberPoints += value;
+    } else if (isWildScoreCard(state, card)) {
+      wildPoints += value;
     } else {
-      actionPoints += 20;
+      actionPoints += value;
     }
   }
 
   return { numberPoints, actionPoints, wildPoints, handValue: numberPoints + actionPoints + wildPoints };
+}
+
+function isWildScoreCard(state: GameStateInternal, card: Card): boolean {
+  if (state.settings.modeId === "flip") {
+    return card.value === "wild" || card.value === "wild3" || card.value === "wildColor";
+  }
+
+  if (state.settings.modeId === "chaos") {
+    return card.value === "wild" || card.value === "wild2" || isActiveChaosSpecialValue(card.value);
+  }
+
+  return card.value === "wild" || card.value === "wild4";
 }
 
 function completeRound(state: GameStateInternal, winnerId: string): void {
@@ -2889,7 +2903,7 @@ function completeRound(state: GameStateInternal, winnerId: string): void {
   const winner = findPlayer(state, winnerId);
   const losers = state.players.filter((player) => player.id !== winnerId);
   const breakdownPlayers = losers.map((player) => {
-    const parts = scoreHandBreakdown(player.hand);
+    const parts = scoreHandBreakdown(state, player.hand);
     return {
       playerId: player.id,
       cardCount: player.hand.length,
