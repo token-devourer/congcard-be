@@ -539,6 +539,24 @@ describe("chaos mode", () => {
     expect(state.players[0]!.hand.some((item) => item.id === "red-1")).toBe(true);
   });
 
+  it("auto-passes a Nuke-blocked drawn card during the countdown", () => {
+    const state = controlledChaosGame();
+    state.players[0]!.hand = [card("nuke", null, "nuke"), card("blue-8", "blue", 8)];
+    state.players[1]!.hand = [card("red-1", "red", 1), card("blue-3", "blue", 3)];
+    state.drawPile = [card("filler", "blue", 2), card("drawn-wild", null, "wild")];
+
+    playCard(state, "p1", "nuke");
+    playCard(state, "p2", "red-1");
+    expect(snapshotFor(state).currentPlayerId).toBe("p1");
+
+    drawCard(state, "p1");
+    settlePendingDraw(state);
+
+    expect(state.players[0]!.drawnCardId).toBeUndefined();
+    expect(state.players[0]!.hand.some((item) => item.id === "drawn-wild")).toBe(true);
+    expect(snapshotFor(state).currentPlayerId).toBe("p2");
+  });
+
   it("cancels a pending draw stack when the Nuke detonates so the room cannot deadlock", () => {
     const state = controlledChaosGame();
     state.settings.stackingEnabled = true;

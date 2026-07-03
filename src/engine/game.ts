@@ -3295,6 +3295,7 @@ function completeDrawContinuation(state: GameStateInternal, continuation: DrawCo
     const activeColor = state.activeColor;
     const playable = Boolean(
       activeColor &&
+        !(isNukeCountdownActive(state) && isNukeBlockedCard(drawn)) &&
         getMode(state.settings).isPlayable(drawn, {
           playerId: player.id,
           activeColor,
@@ -4037,6 +4038,9 @@ function pickAutoPlay(
 function autoCardPlayable(state: GameStateInternal, player: PlayerState, card: Card): boolean {
   const activeColor = state.activeColor;
   if (!activeColor) {
+    return false;
+  }
+  if (isNukeCountdownActive(state) && isNukeBlockedCard(card)) {
     return false;
   }
 
