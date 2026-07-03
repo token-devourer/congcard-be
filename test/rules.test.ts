@@ -475,26 +475,29 @@ describe("chaos mode", () => {
   it("resolves Steal by target and card choice", () => {
     const state = controlledChaosGame();
     state.players[0]!.hand = [card("steal", null, "steal"), card("red-9", "red", 9)];
-    state.players[1]!.hand = [card("blue-7", "blue", 7)];
+    state.players[1]!.hand = [card("blue-7", "blue", 7), card("green-8", "green", 8)];
 
     playCard(state, "p1", "steal");
     expect(state.pendingChaos).toMatchObject({ kind: "steal", phase: "chooseTarget", chooserId: "p1" });
 
     chooseChaosTarget(state, "p1", "p2");
-    expect(snapshotFor(state, "p1").pendingChaos?.selectableCards).toEqual([
-      expect.objectContaining({ id: "blue-7", color: "blue", value: 7 })
-    ]);
+    expect(snapshotFor(state, "p1").pendingChaos?.selectableCards).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "blue-7", color: "blue", value: 7 }),
+        expect.objectContaining({ id: "green-8", color: "green", value: 8 })
+      ])
+    );
 
     chooseChaosCard(state, "p1", "blue-7");
     expect(state.pendingChaos).toBeUndefined();
     expect(state.players[0]!.hand.some((item) => item.id === "blue-7")).toBe(true);
-    expect(state.players[1]!.hand).toHaveLength(0);
+    expect(state.players[1]!.hand).toEqual([expect.objectContaining({ id: "green-8" })]);
   });
 
   it("resolves Favor with the target choosing the card", () => {
     const state = controlledChaosGame();
     state.players[0]!.hand = [card("favor", null, "favor"), card("red-9", "red", 9)];
-    state.players[1]!.hand = [card("blue-7", "blue", 7)];
+    state.players[1]!.hand = [card("blue-7", "blue", 7), card("green-8", "green", 8)];
 
     playCard(state, "p1", "favor");
     chooseChaosTarget(state, "p1", "p2");
@@ -504,6 +507,22 @@ describe("chaos mode", () => {
 
     chooseChaosCard(state, "p2", "blue-7");
     expect(state.players[0]!.hand.some((item) => item.id === "blue-7")).toBe(true);
+    expect(state.players[1]!.hand).toEqual([expect.objectContaining({ id: "green-8" })]);
+  });
+
+  it("auto-resolves Favor when the target only has one card and finishes that target", () => {
+    const state = controlledChaosGame();
+    state.players[0]!.hand = [card("favor", null, "favor"), card("red-9", "red", 9)];
+    state.players[1]!.hand = [card("blue-7", "blue", 7)];
+
+    playCard(state, "p1", "favor");
+    chooseChaosTarget(state, "p1", "p2");
+
+    expect(state.pendingChaos).toBeUndefined();
+    expect(state.players[0]!.hand.some((item) => item.id === "blue-7")).toBe(true);
+    expect(state.players[1]!.hand).toHaveLength(0);
+    expect(state.phase).toBe("roundEnd");
+    expect(state.roundWinnerId).toBe("p2");
   });
 
   it("reveals every hand during Peek and clears after the reveal window", () => {
@@ -741,7 +760,7 @@ describe("chaos mode", () => {
     state.direction = 1;
     state.players[0]!.hand = [card("green-2", "green", 2)];
     state.players[1]!.hand = [card("favor", null, "favor"), card("red-9", "red", 9)];
-    state.players[2]!.hand = [card("blue-7", "blue", 7)];
+    state.players[2]!.hand = [card("blue-7", "blue", 7), card("green-8", "green", 8)];
 
     playCard(state, "p2", "favor");
     chooseChaosTarget(state, "p2", "p3");

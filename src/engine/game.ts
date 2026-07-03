@@ -2328,6 +2328,9 @@ function setChaosCardChoice(state: GameStateInternal, pending: PendingChaosInter
   pending.resolvesAt = now + CHAOS_CHOICE_MS;
   emitChaosPresentation(state, pending.kind, "chooseCard", pending.actorId, now, now + CHAOS_CHOICE_MS);
   pushLog(state, "play", `${findPlayer(state, pending.actorId).nickname} chose ${target.nickname} for ${pending.kind}.`, false);
+  if (target.hand.length === 1) {
+    resolveChaosCardChoice(state, pending, target.hand[0]!.id);
+  }
 }
 
 function resolveChaosCardChoice(state: GameStateInternal, pending: PendingChaosInternal, cardId: string): void {
@@ -2350,6 +2353,12 @@ function resolveChaosCardChoice(state: GameStateInternal, pending: PendingChaosI
   }
   const now = Date.now();
   emitChaosPresentation(state, pending.kind, "sequence", actor.id, now, now + 500);
+  if (chosen && target.hand.length === 0 && !target.finishedRank) {
+    finishPlayerOrCompleteRound(state, target.id);
+    if (state.phase !== "playing") {
+      return;
+    }
+  }
   finishPendingChaos(state, actor.id, true);
 }
 
