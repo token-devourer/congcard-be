@@ -130,6 +130,7 @@ interface DealQueueInternal {
 
 type DrawContinuation =
   | { type: "normal"; automated: boolean }
+  | { type: "finishChaos"; actorId: string; advance: boolean }
   | { type: "setDeadline"; offenderId?: string; preserveOneState?: boolean }
   | { type: "finishWinner"; winnerId: string };
 
@@ -473,12 +474,16 @@ export function kickPlayer(state: GameStateInternal, hostId: string, targetId: s
     }
 
     let chaosCleared = false;
+    let chaosActorSeat: number | undefined;
     if (
       state.pendingChaos?.actorId === targetId ||
       state.pendingChaos?.targetId === targetId ||
       state.pendingChaos?.chooserId === targetId ||
       state.pendingChaos?.punishedPlayerId === targetId
     ) {
+      if (state.pendingChaos.actorId !== targetId) {
+        chaosActorSeat = findPlayer(state, state.pendingChaos.actorId).seat;
+      }
       delete state.pendingChaos;
       chaosCleared = true;
     }
@@ -489,7 +494,7 @@ export function kickPlayer(state: GameStateInternal, hostId: string, targetId: s
     const nextSeat = wasCurrent ? seatAfter(state, target.seat) : state.currentSeat;
     state.players = state.players.filter((player) => player.id !== targetId);
     state.drawPile = shuffleCards([...state.drawPile, ...target.hand]);
-    state.currentSeat = nextSeat;
+    state.currentSeat = chaosActorSeat ?? nextSeat;
     if (wasCurrent) {
       setTurnDeadline(state);
     } else if (chaosCleared && !state.turnDeadline) {
@@ -2113,6 +2118,7 @@ function startChaosSequence(state: GameStateInternal, kind: ChaosEffectKind, pla
 
 function startChaosTargetChoice(state: GameStateInternal, kind: "steal" | "favor", player: PlayerState): void {
   const now = Date.now();
+  const resolvesAt = now + CHAOS_CHOICE_MS;
   const eligibleTargetIds = activePlayers(state)
     .filter((target) => target.id !== player.id && target.hand.length > 0)
     .map((target) => target.id);
@@ -2124,11 +2130,12 @@ function startChaosTargetChoice(state: GameStateInternal, kind: "steal" | "favor
     chooserId: player.id,
     eligibleTargetIds,
     startsAt: now,
-    resolvesAt: now + CHAOS_CHOICE_MS
+    resolvesAt
   };
-  delete state.turnDeadline;
+  state.currentSeat = player.seat;
+  state.turnDeadline = resolvesAt;
   delete state.autoPlayPendingAt;
-  emitChaosPresentation(state, kind, "chooseTarget", player.id, now, now + CHAOS_CHOICE_MS);
+  emitChaosPresentation(state, kind, "chooseTarget", player.id, now, resolvesAt);
 }
 
 function startPeekReveal(state: GameStateInternal, player: PlayerState): void {
@@ -2322,11 +2329,14 @@ export function resolvePendingChaos(state: GameStateInternal): boolean {
 
 function setChaosCardChoice(state: GameStateInternal, pending: PendingChaosInternal, target: PlayerState): void {
   const now = Date.now();
+  const resolvesAt = now + CHAOS_CHOICE_MS;
   pending.phase = "chooseCard";
   pending.targetId = target.id;
   pending.chooserId = pending.kind === "steal" ? pending.actorId : target.id;
-  pending.resolvesAt = now + CHAOS_CHOICE_MS;
-  emitChaosPresentation(state, pending.kind, "chooseCard", pending.actorId, now, now + CHAOS_CHOICE_MS);
+  pending.resolvesAt = resolvesAt;
+  state.currentSeat = pending.kind === "favor" ? target.seat : findPlayer(state, pending.actorId).seat;
+  state.turnDeadline = resolvesAt;
+  emitChaosPresentation(state, pending.kind, "chooseCard", pending.actorId, now, resolvesAt);
   pushLog(state, "play", `${findPlayer(state, pending.actorId).nickname} chose ${target.nickname} for ${pending.kind}.`, false);
   if (target.hand.length === 1) {
     resolveChaosCardChoice(state, pending, target.hand[0]!.id);
@@ -2353,12 +2363,20 @@ function resolveChaosCardChoice(state: GameStateInternal, pending: PendingChaosI
   }
   const now = Date.now();
   emitChaosPresentation(state, pending.kind, "sequence", actor.id, now, now + 500);
+  if (chosen && pending.kind === "steal") {
+    delete state.pendingChaos;
+    delete state.turnDeadline;
+    pushLog(state, "draw", `${target.nickname} drew 2 cards after Steal.`, false);
+    queueFixedDraw(state, target, 2, "penalty", { type: "finishChaos", actorId: actor.id, advance: true });
+    return;
+  }
   if (chosen && target.hand.length === 0 && !target.finishedRank) {
     finishPlayerOrCompleteRound(state, target.id);
     if (state.phase !== "playing") {
       return;
     }
   }
+  state.currentSeat = actor.seat;
   finishPendingChaos(state, actor.id, true);
 }
 
@@ -3302,6 +3320,10 @@ function finishPendingDraw(state: GameStateInternal): void {
 function completeDrawContinuation(state: GameStateInternal, continuation: DrawContinuation, player: PlayerState): void {
   if (continuation.type === "finishWinner") {
     finishPlayerOrCompleteRound(state, continuation.winnerId);
+    return;
+  }
+  if (continuation.type === "finishChaos") {
+    finishPendingChaos(state, continuation.actorId, continuation.advance);
     return;
   }
   if (continuation.type === "normal") {

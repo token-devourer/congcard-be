@@ -496,6 +496,7 @@ describe("chaos mode", () => {
     const state = controlledChaosGame();
     state.players[0]!.hand = [card("steal", null, "steal"), card("red-9", "red", 9)];
     state.players[1]!.hand = [card("blue-7", "blue", 7), card("green-8", "green", 8)];
+    state.drawPile = [card("filler", "red", 1), card("steal-draw-a", "yellow", 2), card("steal-draw-b", "green", 3)];
 
     playCard(state, "p1", "steal");
     expect(state.pendingChaos).toMatchObject({ kind: "steal", phase: "chooseTarget", chooserId: "p1" });
@@ -509,9 +510,34 @@ describe("chaos mode", () => {
     );
 
     chooseChaosCard(state, "p1", "blue-7");
+    expect(state.pendingDraw).toMatchObject({ playerId: "p2", totalCount: 2 });
     expect(state.pendingChaos).toBeUndefined();
+    settlePendingDraw(state);
+
     expect(state.players[0]!.hand.some((item) => item.id === "blue-7")).toBe(true);
-    expect(state.players[1]!.hand).toEqual([expect.objectContaining({ id: "green-8" })]);
+    expect(state.players[1]!.hand.map((item) => item.id)).toEqual(["green-8", "steal-draw-b", "steal-draw-a"]);
+    expect(snapshotFor(state).currentPlayerId).toBe("p2");
+  });
+
+  it("keeps the round active when Steal takes a target's last card", () => {
+    const state = controlledChaosGame();
+    state.players[0]!.hand = [card("steal", null, "steal"), card("red-9", "red", 9)];
+    state.players[1]!.hand = [card("blue-7", "blue", 7)];
+    state.drawPile = [card("filler", "red", 1), card("steal-draw-a", "yellow", 2), card("steal-draw-b", "green", 3)];
+
+    playCard(state, "p1", "steal");
+    chooseChaosTarget(state, "p1", "p2");
+
+    expect(state.phase).toBe("playing");
+    expect(state.pendingDraw).toMatchObject({ playerId: "p2", totalCount: 2 });
+    expect(state.players[1]!.hand).toHaveLength(0);
+
+    settlePendingDraw(state);
+
+    expect(state.phase).toBe("playing");
+    expect(state.players[0]!.hand.some((item) => item.id === "blue-7")).toBe(true);
+    expect(state.players[1]!.hand.map((item) => item.id)).toEqual(["steal-draw-b", "steal-draw-a"]);
+    expect(snapshotFor(state).currentPlayerId).toBe("p2");
   });
 
   it("resolves Favor with the target choosing the card", () => {
@@ -523,6 +549,8 @@ describe("chaos mode", () => {
     chooseChaosTarget(state, "p1", "p2");
 
     expect(state.pendingChaos).toMatchObject({ kind: "favor", phase: "chooseCard", chooserId: "p2" });
+    expect(snapshotFor(state).currentPlayerId).toBe("p2");
+    expect(state.turnDeadline).toBe(state.pendingChaos?.resolvesAt);
     expect(snapshotFor(state, "p2").pendingChaos?.selectableCards?.[0]).toMatchObject({ id: "blue-7" });
 
     chooseChaosCard(state, "p2", "blue-7");
@@ -543,6 +571,26 @@ describe("chaos mode", () => {
     expect(state.players[1]!.hand).toHaveLength(0);
     expect(state.phase).toBe("roundEnd");
     expect(state.roundWinnerId).toBe("p2");
+  });
+
+  it("auto-picks Favor when the target does not choose before the timer", () => {
+    const state = controlledChaosGame();
+    state.players[0]!.hand = [card("favor", null, "favor"), card("red-9", "red", 9)];
+    state.players[1]!.hand = [card("blue-7", "blue", 7), card("green-8", "green", 8)];
+
+    playCard(state, "p1", "favor");
+    chooseChaosTarget(state, "p1", "p2");
+    expect(snapshotFor(state).currentPlayerId).toBe("p2");
+
+    state.pendingChaos!.resolvesAt = 0;
+    state.turnDeadline = 0;
+    expect(resolvePendingChaos(state)).toBe(true);
+
+    expect(state.pendingChaos).toBeUndefined();
+    expect(state.players[0]!.hand.some((item) => item.id === "blue-7")).toBe(true);
+    expect(state.players[1]!.hand).toEqual([expect.objectContaining({ id: "green-8" })]);
+    expect(snapshotFor(state).currentPlayerId).toBe("p2");
+    expect(state.turnDeadline).toBeDefined();
   });
 
   it("reveals every hand during Peek and clears after the reveal window", () => {
@@ -805,7 +853,7 @@ describe("chaos mode", () => {
     playCard(state, "p2", "favor");
     chooseChaosTarget(state, "p2", "p3");
     expect(state.pendingChaos).toMatchObject({ kind: "favor", phase: "chooseCard", chooserId: "p3" });
-    expect(state.turnDeadline).toBeUndefined();
+    expect(state.turnDeadline).toBe(state.pendingChaos?.resolvesAt);
 
     // Host kicks the favor target: the effect dissolves, but the current
     // player (p2) must get a live timeout back, not an idle room.
