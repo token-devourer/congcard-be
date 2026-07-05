@@ -2098,11 +2098,12 @@ function startThrowupSequence(state: GameStateInternal, player: PlayerState, col
   };
   delete state.turnDeadline;
   delete state.autoPlayPendingAt;
-  emitChaosPresentation(state, "throwup", "sequence", player.id, now, now + CHAOS_SEQUENCE_MS);
+  emitChaosPresentation(state, "throwup", "sequence", player.id, now, now + CHAOS_SEQUENCE_MS, { amount: affectedCards.length });
 }
 
 function startChaosSequence(state: GameStateInternal, kind: ChaosEffectKind, player: PlayerState): void {
   const now = Date.now();
+  const targetIds = kind === "flashbang" ? activePlayers(state).map((target) => target.id) : undefined;
   state.pendingChaos = {
     id: nextChaosId(state),
     kind,
@@ -2113,7 +2114,7 @@ function startChaosSequence(state: GameStateInternal, kind: ChaosEffectKind, pla
   };
   delete state.turnDeadline;
   delete state.autoPlayPendingAt;
-  emitChaosPresentation(state, kind, "sequence", player.id, now, now + CHAOS_SEQUENCE_MS);
+  emitChaosPresentation(state, kind, "sequence", player.id, now, now + CHAOS_SEQUENCE_MS, targetIds ? { targetIds } : undefined);
 }
 
 function startChaosTargetChoice(state: GameStateInternal, kind: "steal" | "favor", player: PlayerState): void {
@@ -2150,7 +2151,7 @@ function startPeekReveal(state: GameStateInternal, player: PlayerState): void {
   };
   delete state.turnDeadline;
   delete state.autoPlayPendingAt;
-  emitChaosPresentation(state, "peek", "reveal", player.id, now, now + CHAOS_REVEAL_MS);
+  emitChaosPresentation(state, "peek", "reveal", player.id, now, now + CHAOS_REVEAL_MS, { targetIds: activePlayers(state).map((target) => target.id) });
 }
 
 function startTimeSkip(state: GameStateInternal, player: PlayerState): void {
@@ -2171,7 +2172,7 @@ function startTimeSkip(state: GameStateInternal, player: PlayerState): void {
   }
   delete state.turnDeadline;
   delete state.autoPlayPendingAt;
-  emitChaosPresentation(state, "timeskip", "autoplay", player.id, now, now + Math.max(1, autoTargetIds.length) * CHAOS_TIMESKIP_STEP_MS);
+  emitChaosPresentation(state, "timeskip", "autoplay", player.id, now, now + Math.max(1, autoTargetIds.length) * CHAOS_TIMESKIP_STEP_MS, { targetIds: autoTargetIds });
 }
 
 function startNukeCountdown(state: GameStateInternal, player: PlayerState): void {
@@ -2206,13 +2207,16 @@ function emitChaosPresentation(
   phase: PendingChaosPhase,
   actorId: string,
   startsAt: number,
-  resolvesAt: number
+  resolvesAt: number,
+  options?: Pick<PresentationEvent, "targetIds" | "amount">
 ): void {
   emitPresentation(state, {
     kind: "chaos",
     chaosKind,
     phase,
     actorId,
+    ...(options?.targetIds ? { targetIds: options.targetIds } : {}),
+    ...(options?.amount !== undefined ? { amount: options.amount } : {}),
     startsAt,
     resolvesAt
   });
@@ -2336,7 +2340,7 @@ function setChaosCardChoice(state: GameStateInternal, pending: PendingChaosInter
   pending.resolvesAt = resolvesAt;
   state.currentSeat = pending.kind === "favor" ? target.seat : findPlayer(state, pending.actorId).seat;
   state.turnDeadline = resolvesAt;
-  emitChaosPresentation(state, pending.kind, "chooseCard", pending.actorId, now, resolvesAt);
+  emitChaosPresentation(state, pending.kind, "chooseCard", pending.actorId, now, resolvesAt, { targetIds: [target.id] });
   pushLog(state, "play", `${findPlayer(state, pending.actorId).nickname} chose ${target.nickname} for ${pending.kind}.`, false);
   if (target.hand.length === 1) {
     resolveChaosCardChoice(state, pending, target.hand[0]!.id);
@@ -2362,7 +2366,7 @@ function resolveChaosCardChoice(state: GameStateInternal, pending: PendingChaosI
     pushLog(state, "play", `${actor.nickname} received a card from ${target.nickname}.`, false);
   }
   const now = Date.now();
-  emitChaosPresentation(state, pending.kind, "sequence", actor.id, now, now + 500);
+  emitChaosPresentation(state, pending.kind, "sequence", actor.id, now, now + 500, { targetIds: [target.id], amount: 1 });
   if (chosen && pending.kind === "steal") {
     delete state.pendingChaos;
     delete state.turnDeadline;
@@ -2498,6 +2502,11 @@ function resolveNukeChaos(state: GameStateInternal, pending: PendingChaosInterna
 
 function detonateNukeChaos(state: GameStateInternal, pending: PendingChaosInternal, punished: PlayerState): boolean {
   const collected = collectNukePlayedCards(state, pending);
+  const now = Date.now();
+  emitChaosPresentation(state, "nuke", "detonating", pending.actorId, now, now + 1_600, {
+    targetIds: [punished.id],
+    amount: collected.length
+  });
   punished.hand.push(...collected);
   punished.cardCount = punished.hand.length;
   delete punished.drawnCardId;
@@ -3047,6 +3056,15 @@ function checkChaosEliminations(state: GameStateInternal): boolean {
       continue;
     }
 
+    const bustedCount = player.hand.length;
+    const now = Date.now();
+    emitPresentation(state, {
+      kind: "chaosBust",
+      targetIds: [player.id],
+      amount: bustedCount,
+      startsAt: now,
+      resolvesAt: now + 1_800
+    });
     state.discardPile.push(...player.hand);
     player.hand = [];
     player.cardCount = 0;
@@ -3058,7 +3076,7 @@ function checkChaosEliminations(state: GameStateInternal): boolean {
       ...(state.lastStandPlacements ?? []),
       { playerId: player.id, rank: player.finishedRank, finishedAt: Date.now(), isLoser: true }
     ];
-    pushLog(state, "round", `${player.nickname} busted out with more than 25 cards.`);
+    pushLog(state, "round", `${player.nickname} busted out with ${bustedCount} cards.`);
     changed = true;
   }
 
@@ -4399,6 +4417,7 @@ function presentationDuration(kind: PresentationEventKind): number {
     case "penalty":
     case "stack":
     case "roundEnd":
+    case "chaosBust":
       return 2_000;
     case "skip":
     case "reverse":
