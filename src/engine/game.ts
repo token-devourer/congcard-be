@@ -81,6 +81,7 @@ const CHAOS_CHOICE_MS = 8_000;
 const CHAOS_SEQUENCE_MS = 1_300;
 const CHAOS_REVEAL_MS = 5_000;
 const CHAOS_TIMESKIP_STEP_MS = 900;
+const CHAOS_BUST_PRESENTATION_MS = 2_800;
 const NUKE_COUNTDOWN_MS = 40_000;
 const CHAOS_ALL_SPECIAL_VALUES = new Set<CardValue>([
   "flashbang",
@@ -3063,7 +3064,7 @@ function checkChaosEliminations(state: GameStateInternal): boolean {
       targetIds: [player.id],
       amount: bustedCount,
       startsAt: now,
-      resolvesAt: now + 1_800
+      resolvesAt: now + CHAOS_BUST_PRESENTATION_MS
     });
     state.discardPile.push(...player.hand);
     player.hand = [];
