@@ -594,6 +594,7 @@ export function startRound(state: GameStateInternal): void {
     player.ready = false;
     delete player.drawnCardId;
     delete player.finishedRank;
+    delete player.chaosBusted;
   }
 
   const host = activePlayers.find((player) => player.isHost) ?? activePlayers[0]!;
@@ -3071,6 +3072,7 @@ function checkChaosEliminations(state: GameStateInternal): boolean {
     player.cardCount = 0;
     player.calledOne = false;
     delete player.drawnCardId;
+    player.chaosBusted = true;
     player.finishedRank = (state.lastStandPlacements?.length ?? 0) + 1;
     closeOneWindowForPlayer(state, player.id);
     state.lastStandPlacements = [
@@ -3803,7 +3805,8 @@ function toPublicPlayer(state: GameStateInternal, player: PlayerState, viewerId?
     missedDisconnectedTurns: player.missedDisconnectedTurns,
     ping: player.ping,
     ...(oppositeHand ? { oppositeHand } : {}),
-    ...(player.finishedRank ? { finishedRank: player.finishedRank } : {})
+    ...(player.finishedRank ? { finishedRank: player.finishedRank } : {}),
+    ...(player.chaosBusted ? { chaosBusted: true } : {})
   };
 }
 

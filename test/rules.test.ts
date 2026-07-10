@@ -720,13 +720,18 @@ describe("chaos mode", () => {
     expect(state.phase).toBe("roundEnd");
     expect(state.roundWinnerId).toBe("p1");
     expect(state.players[1]!.finishedRank).toBe(1);
+    expect(state.players[1]!.chaosBusted).toBe(true);
     expect(state.players[1]!.hand).toHaveLength(0);
+    expect(snapshotFor(state).players.find((player) => player.id === "p2")?.chaosBusted).toBe(true);
     const bustEvent = state.presentationEvents.find((event) => event.kind === "chaosBust");
     expect(bustEvent).toMatchObject({
       targetIds: ["p2"],
       amount: 26
     });
     expect(bustEvent!.resolvesAt! - bustEvent!.startsAt!).toBe(3_600);
+
+    startRound(state);
+    expect(state.players[1]!.chaosBusted).toBeUndefined();
   });
 
   it("finishes a player whose hand empties during a Time Skip auto-play", () => {
