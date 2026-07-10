@@ -726,7 +726,7 @@ describe("chaos mode", () => {
       targetIds: ["p2"],
       amount: 26
     });
-    expect(bustEvent!.resolvesAt! - bustEvent!.startsAt!).toBe(2_800);
+    expect(bustEvent!.resolvesAt! - bustEvent!.startsAt!).toBe(3_600);
   });
 
   it("finishes a player whose hand empties during a Time Skip auto-play", () => {
