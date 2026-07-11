@@ -393,6 +393,55 @@ describe("chaos mode", () => {
     expect(deck.filter((item) => item.value === "mirror")).toHaveLength(0);
   });
 
+  it("keeps the fixed special distribution per box", () => {
+    const deck = chaosMode.buildDeck(4, 2, { chaosSpecialSpawnMode: "fixed" });
+
+    expect(deck).toHaveLength(256);
+    expect(deck.filter((item) => item.value === "throwup")).toHaveLength(16);
+    for (const value of ["flashbang", "steal", "favor", "peek", "timeskip", "nuke"] as const) {
+      expect(deck.filter((item) => item.value === value)).toHaveLength(4);
+    }
+  });
+
+  it("uses a global balanced special percentage including ThrowUp", () => {
+    const oneBox = chaosMode.buildDeck(4, 1, {
+      chaosSpecialSpawnMode: "percentage",
+      chaosSpecialSpawnPercent: 16
+    });
+    const twoBoxes = chaosMode.buildDeck(4, 2, {
+      chaosSpecialSpawnMode: "percentage",
+      chaosSpecialSpawnPercent: 16
+    });
+
+    expect(oneBox).toHaveLength(128);
+    expect(oneBox.filter((item) => ["throwup", "flashbang", "steal", "favor", "peek", "timeskip", "nuke"].includes(String(item.value)))).toHaveLength(20);
+    expect(twoBoxes).toHaveLength(256);
+    const counts = ["throwup", "flashbang", "steal", "favor", "peek", "timeskip", "nuke"].map(
+      (value) => twoBoxes.filter((item) => item.value === value).length
+    );
+    expect(counts.reduce((sum, count) => sum + count, 0)).toBe(41);
+    expect(Math.max(...counts) - Math.min(...counts)).toBeLessThanOrEqual(1);
+    expect(twoBoxes.filter((item) => item.value === "throwup").every((item) => item.color !== null)).toBe(true);
+    expect(new Set(twoBoxes.map((item) => item.id)).size).toBe(twoBoxes.length);
+  });
+
+  it("supports zero and full special percentages without changing deck size", () => {
+    const zero = chaosMode.buildDeck(4, 1, {
+      chaosSpecialSpawnMode: "percentage",
+      chaosSpecialSpawnPercent: 0
+    });
+    const full = chaosMode.buildDeck(4, 1, {
+      chaosSpecialSpawnMode: "percentage",
+      chaosSpecialSpawnPercent: 100
+    });
+
+    expect(zero).toHaveLength(128);
+    expect(zero.some((item) => ["throwup", "flashbang", "steal", "favor", "peek", "timeskip", "nuke"].includes(String(item.value)))).toBe(false);
+    expect(full).toHaveLength(128);
+    expect(full.every((item) => ["throwup", "flashbang", "steal", "favor", "peek", "timeskip", "nuke"].includes(String(item.value)))).toBe(true);
+    expect(new Set(full.map((item) => item.id)).size).toBe(full.length);
+  });
+
   it("starts Chaos rounds with 10 cards and at least two deck boxes", () => {
     const state = createGame("CHAOS3", { modeId: "chaos" });
     addPlayer(state, "p1", "Ava", "sun");

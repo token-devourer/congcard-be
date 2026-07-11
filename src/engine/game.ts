@@ -568,7 +568,7 @@ export function startRound(state: GameStateInternal): void {
     delete state.flipSide;
   }
   state.settings.deckBoxes = Math.max(state.settings.deckBoxes, requiredDeckBoxes(activePlayers.length, state.settings.modeId));
-  state.drawPile = mode.buildDeck(activePlayers.length, state.settings.deckBoxes);
+  state.drawPile = mode.buildDeck(activePlayers.length, state.settings.deckBoxes, state.settings.modeOptions);
   state.discardPile = [];
   delete state.pendingChallenge;
   delete state.pendingStack;
