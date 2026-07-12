@@ -547,6 +547,25 @@ describe("chaos mode", () => {
     expect(() => playCard(stacked, "p2", "flashbang-blocked")).toThrow("It is not your turn.");
   });
 
+  it("keeps Flashbang locked until its full cinematic resolves", () => {
+    const state = controlledChaosGame();
+    state.players[0]!.hand = [card("flash", null, "flashbang"), card("red-9", "red", 9)];
+    state.players[1]!.hand = [card("blue-3", "blue", 3), card("blue-4", "blue", 4)];
+
+    playCard(state, "p1", "flash");
+
+    expect(state.pendingChaos).toMatchObject({ kind: "flashbang", phase: "sequence" });
+    expect(state.pendingChaos!.resolvesAt! - state.pendingChaos!.startsAt).toBe(5_650);
+    expect(state.players[0]!.hand.map((item) => item.id)).toEqual(["red-9"]);
+    expect(state.players[1]!.hand.map((item) => item.id)).toEqual(["blue-3", "blue-4"]);
+    expect(() => playCard(state, "p2", "blue-3")).toThrow("Wait for the Chaos card to resolve.");
+
+    resolveChaosPhase(state);
+
+    expect(state.pendingChaos).toBeUndefined();
+    expect(state.players.flatMap((player) => player.hand).map((item) => item.id).sort()).toEqual(["blue-3", "blue-4", "red-9"]);
+  });
+
   it("keeps ThrowUp locked through its dynamic purge cinematic", () => {
     const state = controlledChaosGame();
     const redCards = Array.from({ length: 12 }, (_, index) => card(`red-${index}`, "red", (index % 10) as CardValue));
@@ -763,7 +782,16 @@ describe("chaos mode", () => {
     state.players[1]!.hand = [card("red-1", "red", 1), card("wild", null, "wild")];
 
     playCard(state, "p1", "nuke");
+    const chainId = state.pendingChaos!.id;
+    expect(state.pendingChaos).toMatchObject({ kind: "nuke", phase: "opening" });
+    expect(state.pendingChaos!.resolvesAt! - state.pendingChaos!.startsAt).toBe(3_200);
+    expect(snapshotFor(state).currentPlayerId).toBe("p1");
+    expect(() => playCard(state, "p2", "wild", "blue")).toThrow("Wait for the Chaos card to resolve.");
+
+    resolveChaosPhase(state);
+
     expect(state.pendingChaos).toMatchObject({ kind: "nuke", phase: "countdown" });
+    expect(state.pendingChaos!.countdownEndsAt! - state.pendingChaos!.startsAt).toBe(40_000);
     expect(snapshotFor(state).currentPlayerId).toBe("p2");
     expect(() => playCard(state, "p2", "wild", "blue")).toThrow("blocked during the Nuke countdown");
 
@@ -771,8 +799,66 @@ describe("chaos mode", () => {
     expect(snapshotFor(state).currentPlayerId).toBe("p1");
     state.pendingChaos!.countdownEndsAt = 0;
     expect(resolvePendingChaos(state)).toBe(true);
+
+    expect(state.pendingChaos).toMatchObject({ kind: "nuke", phase: "detonating", punishedPlayerId: "p1" });
+    expect(state.pendingChaos!.resolvesAt! - state.pendingChaos!.startsAt).toBe(2_800);
+    expect(state.players[0]!.hand.some((item) => item.id === "red-1")).toBe(false);
+    expect(state.presentationEvents.filter((event) => event.kind === "chaos" && event.chaosKind === "nuke").map((event) => event.chainId)).toEqual([
+      chainId,
+      chainId,
+      chainId
+    ]);
+
+    resolveChaosPhase(state);
+
     expect(state.pendingChaos).toBeUndefined();
     expect(state.players[0]!.hand.some((item) => item.id === "red-1")).toBe(true);
+  });
+
+  it("still runs a full Nuke detonation when no countdown cards were played", () => {
+    const state = controlledChaosGame();
+    state.players[0]!.hand = [card("nuke", null, "nuke"), card("red-9", "red", 9)];
+    state.players[1]!.hand = [card("blue-3", "blue", 3), card("blue-4", "blue", 4)];
+
+    playCard(state, "p1", "nuke");
+    resolveChaosPhase(state);
+    state.pendingChaos!.countdownEndsAt = 0;
+    expect(resolvePendingChaos(state)).toBe(true);
+
+    expect(state.pendingChaos).toMatchObject({ kind: "nuke", phase: "detonating", punishedPlayerId: "p2" });
+    expect(state.presentationEvents.at(-1)).toMatchObject({ chaosKind: "nuke", phase: "detonating", amount: 0 });
+    resolveChaosPhase(state);
+
+    expect(state.pendingChaos).toBeUndefined();
+    expect(state.players[1]!.hand.map((item) => item.id)).toEqual(["blue-3", "blue-4"]);
+  });
+
+  it("checks Chaos Bust only after the Nuke detonation finishes", () => {
+    const state = controlledChaosGame();
+    state.players[0]!.hand = [
+      card("nuke", null, "nuke"),
+      ...Array.from({ length: 25 }, (_, index) => card(`p1-${index}`, "blue", (index % 10) as Card["value"]))
+    ];
+    state.players[1]!.hand = [card("red-1", "red", 1), card("blue-3", "blue", 3)];
+
+    playCard(state, "p1", "nuke");
+    resolveChaosPhase(state);
+    playCard(state, "p2", "red-1");
+    state.pendingChaos!.countdownEndsAt = 0;
+    expect(resolvePendingChaos(state)).toBe(true);
+
+    expect(state.phase).toBe("playing");
+    expect(state.players[0]!.hand).toHaveLength(25);
+    expect(state.players[0]!.chaosBusted).toBeUndefined();
+    resolveChaosPhase(state);
+
+    expect(state.phase).toBe("roundEnd");
+    expect(state.players[0]!.chaosBusted).toBe(true);
+    expect(state.presentationEvents.find((event) => event.kind === "chaosBust")).toMatchObject({
+      kind: "chaosBust",
+      targetIds: ["p1"],
+      amount: 26
+    });
   });
 
   it("auto-passes a Nuke-blocked drawn card during the countdown", () => {
@@ -782,6 +868,7 @@ describe("chaos mode", () => {
     state.drawPile = [card("filler", "blue", 2), card("drawn-wild", null, "wild")];
 
     playCard(state, "p1", "nuke");
+    resolveChaosPhase(state);
     playCard(state, "p2", "red-1");
     expect(snapshotFor(state).currentPlayerId).toBe("p1");
 
@@ -800,6 +887,7 @@ describe("chaos mode", () => {
     state.players[1]!.hand = [card("red-draw1", "red", "draw1"), card("blue-3", "blue", 3), card("blue-4", "blue", 4)];
 
     playCard(state, "p1", "nuke");
+    resolveChaosPhase(state);
     expect(state.pendingChaos).toMatchObject({ kind: "nuke", phase: "countdown" });
 
     // p2 opens a +1 stack during the countdown; p1 holds a +1, so the stack stays live.
@@ -809,6 +897,10 @@ describe("chaos mode", () => {
 
     state.pendingChaos!.countdownEndsAt = 0;
     expect(resolvePendingChaos(state)).toBe(true);
+    expect(state.pendingChaos).toMatchObject({ kind: "nuke", phase: "detonating" });
+    expect(state.pendingStack).toBeDefined();
+
+    resolveChaosPhase(state);
 
     // Detonation reclaims the stacked +1 into p1's hand, so the stack must dissolve
     // instead of pinning a target the seat has already moved past.
@@ -826,6 +918,7 @@ describe("chaos mode", () => {
     state.players[1]!.hand = [card("blue-3", "blue", 3), card("blue-4", "blue", 4)];
 
     playCard(state, "p1", "nuke");
+    resolveChaosPhase(state);
     drawCard(state, "p2");
     expect(state.pendingDraw).toBeDefined();
 
@@ -835,6 +928,8 @@ describe("chaos mode", () => {
 
     settlePendingDraw(state);
     expect(resolvePendingChaos(state)).toBe(true);
+    expect(state.pendingChaos).toMatchObject({ kind: "nuke", phase: "detonating" });
+    resolveChaosPhase(state);
     expect(state.pendingChaos).toBeUndefined();
   });
 
@@ -911,6 +1006,10 @@ describe("chaos mode", () => {
     state.players[1]!.hand = [card("red-9", "red", 9), card("wild", null, "wild")];
 
     playCard(state, "p1", "nuke");
+
+    expect(state.phase).toBe("playing");
+    expect(state.pendingChaos).toMatchObject({ kind: "nuke", phase: "opening" });
+    resolveChaosPhase(state);
 
     expect(state.phase).toBe("roundEnd");
     expect(state.roundWinnerId).toBe("p1");

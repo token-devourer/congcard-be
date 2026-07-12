@@ -57,6 +57,27 @@ describe("synchronized round dealing", () => {
     expect(state.discardPile).toHaveLength(1);
   });
 
+  it("starts a full-special Chaos deck without looping while choosing an opener", () => {
+    const state = createGame("CHAOS1", {
+      modeId: "chaos",
+      deckBoxes: 2,
+      modeOptions: {
+        chaosSpecialSpawnMode: "percentage",
+        chaosSpecialSpawnPercent: 100
+      }
+    });
+    addPlayer(state, "host", "Host", "sun");
+    addPlayer(state, "p2", "Second", "moon");
+    setReady(state, "p2", true);
+
+    startRound(state);
+    finishAutomaticDeal(state);
+
+    expect(state.phase).toBe("playing");
+    expect(state.discardPile).toHaveLength(1);
+    expect(state.players.every((player) => player.hand.length === 10)).toBe(true);
+  });
+
   it("assigns the host for the first Last Stand round", () => {
     const state = lobby("lastStand");
     startRound(state);
