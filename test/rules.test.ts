@@ -555,7 +555,7 @@ describe("chaos mode", () => {
     playCard(state, "p1", "flash");
 
     expect(state.pendingChaos).toMatchObject({ kind: "flashbang", phase: "sequence" });
-    expect(state.pendingChaos!.resolvesAt! - state.pendingChaos!.startsAt).toBe(4_100);
+    expect(state.pendingChaos!.resolvesAt! - state.pendingChaos!.startsAt).toBe(4_800);
     expect(state.players[0]!.hand.map((item) => item.id)).toEqual(["red-9"]);
     expect(state.players[1]!.hand.map((item) => item.id)).toEqual(["blue-3", "blue-4"]);
     expect(() => playCard(state, "p2", "blue-3")).toThrow("Wait for the Chaos card to resolve.");
