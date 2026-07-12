@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Card } from "@congcard/shared";
+import type { Card, CardValue } from "@congcard/shared";
 import { config } from "../src/config.js";
 import { standardMode } from "../src/engine/modes/standard.js";
 import { applyFlipSide, flipMode } from "../src/engine/modes/flip.js";
@@ -380,6 +380,12 @@ function finishAutomaticDeal(state: GameStateInternal): void {
   }
 }
 
+function resolveChaosPhase(state: GameStateInternal): void {
+  if (!state.pendingChaos) throw new Error("Expected a pending Chaos phase.");
+  state.pendingChaos.resolvesAt = 0;
+  resolvePendingChaos(state);
+}
+
 describe("chaos mode", () => {
   it("builds a playable chaos deck with selected meme cards only", () => {
     const deck = chaosMode.buildDeck(4);
@@ -541,6 +547,37 @@ describe("chaos mode", () => {
     expect(() => playCard(stacked, "p2", "flashbang-blocked")).toThrow("It is not your turn.");
   });
 
+  it("keeps ThrowUp locked through its dynamic purge cinematic", () => {
+    const state = controlledChaosGame();
+    const redCards = Array.from({ length: 12 }, (_, index) => card(`red-${index}`, "red", (index % 10) as CardValue));
+    state.players[0]!.hand = [card("throwup", "red", "throwup"), ...redCards, card("blue-7", "blue", 7)];
+
+    playCard(state, "p1", "throwup");
+
+    expect(state.pendingChaos).toMatchObject({ kind: "throwup", phase: "sequence" });
+    expect(state.pendingChaos!.resolvesAt! - state.pendingChaos!.startsAt).toBe(2_180);
+    expect(state.players[0]!.hand).toHaveLength(13);
+    expect(state.presentationEvents.at(-1)).toMatchObject({ chaosKind: "throwup", amount: 12, color: "red" });
+
+    resolveChaosPhase(state);
+
+    expect(state.players[0]!.hand.map((item) => item.id)).toEqual(["blue-7"]);
+    expect(snapshotFor(state).currentPlayerId).toBe("p2");
+  });
+
+  it("finishes a zero-card ThrowUp cinematic without stalling", () => {
+    const state = controlledChaosGame();
+    state.players[0]!.hand = [card("throwup", "red", "throwup"), card("blue-7", "blue", 7)];
+
+    playCard(state, "p1", "throwup");
+    expect(state.pendingChaos!.resolvesAt! - state.pendingChaos!.startsAt).toBe(1_900);
+    resolveChaosPhase(state);
+
+    expect(state.players[0]!.hand.map((item) => item.id)).toEqual(["blue-7"]);
+    expect(state.pendingChaos).toBeUndefined();
+    expect(snapshotFor(state).currentPlayerId).toBe("p2");
+  });
+
   it("resolves Steal by target and card choice", () => {
     const state = controlledChaosGame();
     state.players[0]!.hand = [card("steal", null, "steal"), card("red-9", "red", 9)];
@@ -548,9 +585,20 @@ describe("chaos mode", () => {
     state.drawPile = [card("filler", "red", 1), card("steal-draw-a", "yellow", 2), card("steal-draw-b", "green", 3)];
 
     playCard(state, "p1", "steal");
+    expect(state.pendingChaos).toMatchObject({ kind: "steal", phase: "opening" });
+    expect(state.pendingChaos!.resolvesAt! - state.pendingChaos!.startsAt).toBe(3_550);
+    expect(state.turnDeadline).toBeUndefined();
+    expect(() => chooseChaosTarget(state, "p1", "p2")).toThrow("There is no Chaos target");
+    resolveChaosPhase(state);
     expect(state.pendingChaos).toMatchObject({ kind: "steal", phase: "chooseTarget", chooserId: "p1" });
+    expect(state.pendingChaos!.resolvesAt! - state.pendingChaos!.startsAt).toBe(8_000);
 
     chooseChaosTarget(state, "p1", "p2");
+    expect(state.pendingChaos).toMatchObject({ kind: "steal", phase: "opening", targetId: "p2" });
+    expect(state.pendingChaos!.resolvesAt! - state.pendingChaos!.startsAt).toBe(850);
+    expect(snapshotFor(state, "p1").pendingChaos?.selectableCards).toBeUndefined();
+    expect(() => chooseChaosCard(state, "p1", "blue-7")).toThrow("There is no Chaos card");
+    resolveChaosPhase(state);
     expect(snapshotFor(state, "p1").pendingChaos?.selectableCards).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: "blue-7", color: "blue", value: 7 }),
@@ -559,6 +607,10 @@ describe("chaos mode", () => {
     );
 
     chooseChaosCard(state, "p1", "blue-7");
+    expect(state.pendingChaos).toMatchObject({ kind: "steal", phase: "sequence", targetId: "p2" });
+    expect(state.pendingChaos!.resolvesAt! - state.pendingChaos!.startsAt).toBe(3_400);
+    expect(state.pendingDraw).toBeUndefined();
+    resolveChaosPhase(state);
     expect(state.pendingDraw).toMatchObject({ playerId: "p2", totalCount: 2 });
     expect(state.pendingChaos).toBeUndefined();
     settlePendingDraw(state);
@@ -575,11 +627,15 @@ describe("chaos mode", () => {
     state.drawPile = [card("filler", "red", 1), card("steal-draw-a", "yellow", 2), card("steal-draw-b", "green", 3)];
 
     playCard(state, "p1", "steal");
+    resolveChaosPhase(state);
     chooseChaosTarget(state, "p1", "p2");
+    resolveChaosPhase(state);
 
     expect(state.phase).toBe("playing");
-    expect(state.pendingDraw).toMatchObject({ playerId: "p2", totalCount: 2 });
+    expect(state.pendingChaos).toMatchObject({ kind: "steal", phase: "sequence" });
     expect(state.players[1]!.hand).toHaveLength(0);
+    resolveChaosPhase(state);
+    expect(state.pendingDraw).toMatchObject({ playerId: "p2", totalCount: 2 });
 
     settlePendingDraw(state);
 
@@ -595,7 +651,14 @@ describe("chaos mode", () => {
     state.players[1]!.hand = [card("blue-7", "blue", 7), card("green-8", "green", 8)];
 
     playCard(state, "p1", "favor");
+    expect(state.pendingChaos).toMatchObject({ kind: "favor", phase: "opening" });
+    expect(state.pendingChaos!.resolvesAt! - state.pendingChaos!.startsAt).toBe(2_250);
+    resolveChaosPhase(state);
     chooseChaosTarget(state, "p1", "p2");
+    expect(state.pendingChaos).toMatchObject({ kind: "favor", phase: "opening", targetId: "p2" });
+    expect(state.pendingChaos!.resolvesAt! - state.pendingChaos!.startsAt).toBe(2_100);
+    expect(state.turnDeadline).toBeUndefined();
+    resolveChaosPhase(state);
 
     expect(state.pendingChaos).toMatchObject({ kind: "favor", phase: "chooseCard", chooserId: "p2" });
     expect(snapshotFor(state).currentPlayerId).toBe("p2");
@@ -603,8 +666,12 @@ describe("chaos mode", () => {
     expect(snapshotFor(state, "p2").pendingChaos?.selectableCards?.[0]).toMatchObject({ id: "blue-7" });
 
     chooseChaosCard(state, "p2", "blue-7");
+    expect(state.pendingChaos).toMatchObject({ kind: "favor", phase: "sequence" });
+    expect(state.pendingChaos!.resolvesAt! - state.pendingChaos!.startsAt).toBe(2_150);
     expect(state.players[0]!.hand.some((item) => item.id === "blue-7")).toBe(true);
     expect(state.players[1]!.hand).toEqual([expect.objectContaining({ id: "green-8" })]);
+    resolveChaosPhase(state);
+    expect(state.pendingChaos).toBeUndefined();
   });
 
   it("auto-resolves Favor when the target only has one card and finishes that target", () => {
@@ -613,11 +680,16 @@ describe("chaos mode", () => {
     state.players[1]!.hand = [card("blue-7", "blue", 7)];
 
     playCard(state, "p1", "favor");
+    resolveChaosPhase(state);
     chooseChaosTarget(state, "p1", "p2");
+    expect(state.pendingChaos).toMatchObject({ kind: "favor", phase: "opening" });
+    resolveChaosPhase(state);
 
-    expect(state.pendingChaos).toBeUndefined();
+    expect(state.pendingChaos).toMatchObject({ kind: "favor", phase: "sequence" });
     expect(state.players[0]!.hand.some((item) => item.id === "blue-7")).toBe(true);
     expect(state.players[1]!.hand).toHaveLength(0);
+    expect(state.phase).toBe("playing");
+    resolveChaosPhase(state);
     expect(state.phase).toBe("roundEnd");
     expect(state.roundWinnerId).toBe("p2");
   });
@@ -628,12 +700,17 @@ describe("chaos mode", () => {
     state.players[1]!.hand = [card("blue-7", "blue", 7), card("green-8", "green", 8)];
 
     playCard(state, "p1", "favor");
+    resolveChaosPhase(state);
     chooseChaosTarget(state, "p1", "p2");
+    resolveChaosPhase(state);
     expect(snapshotFor(state).currentPlayerId).toBe("p2");
 
     state.pendingChaos!.resolvesAt = 0;
     state.turnDeadline = 0;
     expect(resolvePendingChaos(state)).toBe(true);
+
+    expect(state.pendingChaos).toMatchObject({ kind: "favor", phase: "sequence" });
+    resolveChaosPhase(state);
 
     expect(state.pendingChaos).toBeUndefined();
     expect(state.players[0]!.hand.some((item) => item.id === "blue-7")).toBe(true);
@@ -649,12 +726,35 @@ describe("chaos mode", () => {
 
     playCard(state, "p1", "peek");
 
+    expect(state.pendingChaos).toMatchObject({ kind: "peek", phase: "opening" });
+    expect(snapshotFor(state, "p1").pendingChaos?.revealedHands).toBeUndefined();
+    resolveChaosPhase(state);
+    expect(state.pendingChaos).toMatchObject({ kind: "peek", phase: "reveal" });
+    expect(state.pendingChaos!.resolvesAt! - state.pendingChaos!.startsAt).toBe(4_800);
+
     expect(snapshotFor(state, "p1").pendingChaos?.revealedHands?.p2?.[0]).toMatchObject({ color: "blue", value: 7 });
     expect(snapshotFor(state, "p2").pendingChaos?.revealedHands?.p1?.some((item) => item.value === 9)).toBe(true);
 
     state.pendingChaos!.resolvesAt = 0;
     expect(resolvePendingChaos(state)).toBe(true);
     expect(state.pendingChaos).toBeUndefined();
+  });
+
+  it("waits for the Peek cinematic before completing a winning round", () => {
+    const state = controlledChaosGame();
+    state.players[0]!.hand = [card("peek", null, "peek")];
+    state.players[1]!.hand = [card("blue-7", "blue", 7)];
+
+    playCard(state, "p1", "peek");
+    expect(state.phase).toBe("playing");
+    expect(state.pendingChaos).toMatchObject({ kind: "peek", phase: "opening" });
+    resolveChaosPhase(state);
+    expect(state.phase).toBe("playing");
+    expect(state.pendingChaos).toMatchObject({ kind: "peek", phase: "reveal" });
+    resolveChaosPhase(state);
+
+    expect(state.phase).toBe("roundEnd");
+    expect(state.roundWinnerId).toBe("p1");
   });
 
   it("blocks wild and chaos cards during Nuke countdown and punishes the active player", () => {
@@ -789,7 +889,11 @@ describe("chaos mode", () => {
     state.players[1]!.hand = [card("red-3", "red", 3)];
 
     playCard(state, "p1", "timeskip");
+    expect(state.pendingChaos).toMatchObject({ kind: "timeskip", phase: "opening" });
+    expect(state.pendingChaos!.resolvesAt! - state.pendingChaos!.startsAt).toBe(4_900);
+    resolveChaosPhase(state);
     expect(state.pendingChaos).toMatchObject({ kind: "timeskip", phase: "autoplay" });
+    expect(state.pendingChaos!.resolvesAt! - state.pendingChaos!.startsAt).toBe(1_000);
 
     state.pendingChaos!.nextAutoAt = 0;
     expect(resolvePendingChaos(state)).toBe(true);
@@ -851,18 +955,29 @@ describe("chaos mode", () => {
     state.players[1]!.hand = [card("wild-b", null, "wild")];
     state.players[2]!.hand = [card("wild-c", null, "wild")];
 
-    // The Time Skip is p1's last card: they finish immediately, the skip plays on.
+    // The Time Skip is p1's last card, but finishing waits for the cinematic.
     playCard(state, "p1", "timeskip");
-    expect(state.players[0]!.finishedRank).toBe(1);
-    expect(state.pendingChaos).toMatchObject({ kind: "timeskip" });
+    expect(state.players[0]!.finishedRank).toBeUndefined();
+    expect(state.pendingChaos).toMatchObject({ kind: "timeskip", phase: "opening" });
+    resolveChaosPhase(state);
+    expect(state.pendingChaos).toMatchObject({ kind: "timeskip", phase: "autoplay" });
 
-    for (let step = 0; step < 3 && state.pendingChaos; step += 1) {
-      state.pendingChaos.nextAutoAt = 0;
-      resolvePendingChaos(state);
-    }
+    state.pendingChaos!.nextAutoAt = 0;
+    resolvePendingChaos(state);
+    expect(state.pendingChaos).toMatchObject({ kind: "timeskip", phase: "autoplay", autoIndex: 1 });
+    state.pendingChaos!.nextAutoAt = 0;
+    resolvePendingChaos(state);
+    expect(state.pendingChaos).toMatchObject({ kind: "timeskip", phase: "autoplay", autoIndex: 2 });
+    state.pendingChaos!.nextAutoAt = 0;
+    resolvePendingChaos(state);
+    expect(state.pendingChaos).toMatchObject({ kind: "timeskip", phase: "sequence" });
+    expect(state.pendingChaos!.resolvesAt! - state.pendingChaos!.startsAt).toBe(1_000);
+    expect(state.turnDeadline).toBeUndefined();
+    resolveChaosPhase(state);
 
     // The seat must not park on the finished actor waiting for a timeout.
     expect(state.pendingChaos).toBeUndefined();
+    expect(state.players[0]!.finishedRank).toBe(1);
     expect(snapshotFor(state).currentPlayerId).toBe("p2");
     expect(state.turnDeadline).toBeDefined();
   });
@@ -911,7 +1026,9 @@ describe("chaos mode", () => {
     state.players[2]!.hand = [card("blue-7", "blue", 7), card("green-8", "green", 8)];
 
     playCard(state, "p2", "favor");
+    resolveChaosPhase(state);
     chooseChaosTarget(state, "p2", "p3");
+    resolveChaosPhase(state);
     expect(state.pendingChaos).toMatchObject({ kind: "favor", phase: "chooseCard", chooserId: "p3" });
     expect(state.turnDeadline).toBe(state.pendingChaos?.resolvesAt);
 
